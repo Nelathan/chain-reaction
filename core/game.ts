@@ -2,6 +2,7 @@ export const WIDTH = 8;
 export const HEIGHT = 8;
 export const CELLS = WIDTH * HEIGHT;
 export const PLAYER_COUNT = 2;
+export const MAX_LOGGED_WAVES = 64;
 
 type Move = [number, number];
 
@@ -11,6 +12,11 @@ export type FixtureCase = {
   owners: number[];
   playersAliveMask: number;
   lastMoveExploded: number;
+  waveCount: number;
+  waveLogTruncated: number;
+  waveExploded: number[];
+  waveTokens: number[];
+  waveOwners: number[];
   winner: number;
   legalP1: number[];
   legalP2: number[];
@@ -28,6 +34,11 @@ export class ChainReaction {
   turnCount: number;
   playersAliveMask: number;
   lastMoveExploded: number;
+  waveCount: number;
+  waveLogTruncated: number;
+  waveExploded: Int8Array;
+  waveTokens: Int8Array;
+  waveOwners: Int8Array;
 
   constructor() {
     this.tokens = new Int8Array(CELLS);
@@ -38,6 +49,11 @@ export class ChainReaction {
     this.turnCount = 0;
     this.playersAliveMask = this.allPlayersMask();
     this.lastMoveExploded = 0;
+    this.waveCount = 0;
+    this.waveLogTruncated = 0;
+    this.waveExploded = new Int8Array(MAX_LOGGED_WAVES * CELLS);
+    this.waveTokens = new Int8Array(MAX_LOGGED_WAVES * CELLS);
+    this.waveOwners = new Int8Array(MAX_LOGGED_WAVES * CELLS);
   }
 
   reset(): void {
@@ -49,6 +65,7 @@ export class ChainReaction {
     this.turnCount = 0;
     this.playersAliveMask = this.allPlayersMask();
     this.lastMoveExploded = 0;
+    this.clearWaveLog();
   }
 
   getMass(idx: number): number {
@@ -75,6 +92,7 @@ export class ChainReaction {
     this.owners[actionIdx] = playerId;
     this.turnCount++;
     this.lastMoveExploded = 0;
+    this.clearWaveLog();
 
     let unstable = true;
     while (unstable) {
@@ -130,6 +148,9 @@ export class ChainReaction {
       this.sourceKeepsResidualOwner(),
       this.sourceClearsWhenEmpty(),
       this.eliminationAfterExplosion(),
+      this.criticalMassCorner(),
+      this.criticalMassEdge(),
+      this.criticalMassCenter(),
       this.invalidMoveDoesNotMutate(),
     ];
 
@@ -138,6 +159,7 @@ export class ChainReaction {
 
   private resolveWave(): boolean {
     let exploded = false;
+    const explodedCells = new Int8Array(CELLS);
 
     this.nextTokens.set(this.tokens);
     this.nextOwners.set(this.owners);
@@ -150,6 +172,7 @@ export class ChainReaction {
       const mass = this.getMass(i);
       if (this.tokens[i] >= mass) {
         exploded = true;
+        explodedCells[i] = 1;
         this.nextTokens[i] -= mass;
         if (this.nextTokens[i] === 0) this.nextOwners[i] = 0;
 
@@ -168,7 +191,29 @@ export class ChainReaction {
     this.applyPressure();
     this.tokens.set(this.nextTokens);
     this.owners.set(this.nextOwners);
+    this.logWave(explodedCells);
     return true;
+  }
+
+  private clearWaveLog(): void {
+    this.waveCount = 0;
+    this.waveLogTruncated = 0;
+    this.waveExploded.fill(0);
+    this.waveTokens.fill(0);
+    this.waveOwners.fill(0);
+  }
+
+  private logWave(explodedCells: Int8Array): void {
+    if (this.waveCount >= MAX_LOGGED_WAVES) {
+      this.waveLogTruncated = 1;
+      return;
+    }
+
+    const base = this.waveCount * CELLS;
+    this.waveExploded.set(explodedCells, base);
+    this.waveTokens.set(this.tokens, base);
+    this.waveOwners.set(this.owners, base);
+    this.waveCount++;
   }
 
   private addPressure(idx: number, owner: number): void {
@@ -276,6 +321,27 @@ export class ChainReaction {
     return this.fixtureCase("elimination-after-explosion", game);
   }
 
+  private static criticalMassCorner(): FixtureCase {
+    const game = new ChainReaction();
+    game.loadForFixture([1], [1], 0b11);
+    game.step(0, 1);
+    return this.fixtureCase("critical-mass-corner", game);
+  }
+
+  private static criticalMassEdge(): FixtureCase {
+    const game = new ChainReaction();
+    game.loadForFixture([0, 2], [0, 1], 0b11);
+    game.step(1, 1);
+    return this.fixtureCase("critical-mass-edge", game);
+  }
+
+  private static criticalMassCenter(): FixtureCase {
+    const game = new ChainReaction();
+    game.loadForFixture([0, 0, 0, 0, 0, 0, 0, 0, 0, 3], [0, 0, 0, 0, 0, 0, 0, 0, 0, 1], 0b11);
+    game.step(9, 1);
+    return this.fixtureCase("critical-mass-center", game);
+  }
+
   private static invalidMoveDoesNotMutate(): FixtureCase {
     const game = new ChainReaction();
     game.step(0, 1);
@@ -299,6 +365,11 @@ export class ChainReaction {
       owners: Array.from(game.owners),
       playersAliveMask: game.playersAliveMask,
       lastMoveExploded: game.lastMoveExploded,
+      waveCount: game.waveCount,
+      waveLogTruncated: game.waveLogTruncated,
+      waveExploded: Array.from(game.waveExploded),
+      waveTokens: Array.from(game.waveTokens),
+      waveOwners: Array.from(game.waveOwners),
       winner: game.getWinner(),
       legalP1: Array.from(legalP1),
       legalP2: Array.from(legalP2),

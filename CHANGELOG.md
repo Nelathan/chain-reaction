@@ -20,3 +20,5 @@ Chronological ledger. Record why changes happened, not just what changed.
 - Simplified player lifecycle state to an alive mask initialized with all participating players. Winner is now derived from that mask rather than stored, and eliminations are recomputed only after explosion transitions.
 - Clarified that simulation state and training observation are separate schemas. The core stores owner plus token count because transient overfull cells are valid during cascade resolution; signed-distance observation is only a derived stable-state view.
 - Accepted unbounded cascade resolution for the MVP. Any future wave cap must be an explicit bounded-mode/error-state design, not a quiet physics change.
+- Added explicit corner, edge, and center critical-mass fixtures. The MVP keeps the 8x8 chessboard shape, and these tests pin the geometry before renderer or training consumers build assumptions on top of it.
+- Added a fixed-size per-move wave log to the shared core and Cython bridge. Rendering can now animate actual simultaneous cascade waves without re-simulating rules, while simulation remains unbounded; only the inspection log can truncate.

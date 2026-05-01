@@ -15,15 +15,58 @@ function getCase(name) {
   assert.equal(item.winner, 0);
   assert.equal(item.lastMoveExploded, 0);
   assert.equal(item.playersAliveMask, 3);
+  assert.equal(item.waveCount, 0);
 }
 
 {
   const item = getCase("opposing-pressure-cancels");
   assert.equal(item.lastMoveExploded, 1);
+  assert.equal(item.waveCount, 1);
+  assert.equal(item.waveLogTruncated, 0);
+  assert.equal(item.waveExploded[0], 1);
   assert.equal(item.tokens[1], 0);
   assert.equal(item.owners[1], 0);
   assert.equal(item.playersAliveMask, 3);
   assert.equal(item.winner, 0);
+}
+
+{
+  const item = getCase("critical-mass-corner");
+  assert.equal(item.lastMoveExploded, 1);
+  assert.equal(item.waveCount, 1);
+  assert.equal(item.waveExploded[0], 1);
+  assert.equal(item.tokens[0], 0);
+  assert.equal(item.owners[0], 0);
+  assert.equal(item.tokens[1], 1);
+  assert.equal(item.owners[1], 1);
+  assert.equal(item.tokens[8], 1);
+  assert.equal(item.owners[8], 1);
+}
+
+{
+  const item = getCase("critical-mass-edge");
+  assert.equal(item.lastMoveExploded, 1);
+  assert.equal(item.waveCount, 1);
+  assert.equal(item.waveExploded[1], 1);
+  assert.equal(item.tokens[1], 0);
+  assert.equal(item.owners[1], 0);
+  for (const idx of [0, 2, 9]) {
+    assert.equal(item.tokens[idx], 1);
+    assert.equal(item.owners[idx], 1);
+  }
+}
+
+{
+  const item = getCase("critical-mass-center");
+  assert.equal(item.lastMoveExploded, 1);
+  assert.equal(item.waveCount, 1);
+  assert.equal(item.waveExploded[9], 1);
+  assert.equal(item.tokens[9], 0);
+  assert.equal(item.owners[9], 0);
+  for (const idx of [1, 8, 10, 17]) {
+    assert.equal(item.tokens[idx], 1);
+    assert.equal(item.owners[idx], 1);
+  }
 }
 
 {

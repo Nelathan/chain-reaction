@@ -55,6 +55,7 @@ The core uses fixed-width integer arrays suitable for cache-local stepping and e
 - token counts fit in `int8_t` / `uint8_t`;
 - owners fit in `int8_t` / `uint8_t`;
 - critical mass is computed from coordinates or exposed as a fixed map;
+- wave logs are fixed-size flat arrays in a separate optional `WaveLog`, never heap-backed containers;
 - no `std::vector`, `std::map`, heap allocation, exceptions, RTTI, or dependency-bearing STL structures in the core loop.
 
 PufferLib must be able to duplicate thousands of environments per CPU core without fighting allocator churn or pointer-heavy memory layouts.
@@ -96,6 +97,8 @@ Cells made critical by incoming pressure do not explode until the next wave. Thi
 Opposing simultaneous pressure must not resolve by scan order. For the two-player MVP, equal opposing pressure cancels at the target. Unequal opposing pressure leaves only the net pressure, owned by the stronger side. This keeps engine iteration order from deciding ownership.
 
 For the MVP, cascades resolve until stable without a maximum wave guard. Infinite or very long cascades are accepted as part of the terrain rather than hidden behind an arbitrary cutoff. If this becomes a runtime problem, the fix must be explicit: expose a bounded stepping mode or error state, not silently alter physics.
+
+The core can record a fixed-size cascade flight recorder for the most recent move through `cr_step_with_log`: per-wave exploding source cells plus the post-wave token and owner arrays. The plain `cr_step` path stays lean for training throughput. If a cascade exceeds `CR_MAX_LOGGED_WAVES`, simulation still resolves to stability; only the log truncates and sets `wave_log_truncated`. A visualization cap must never become a physics cap by accident.
 
 ## Simulation vs Observation Schema
 
