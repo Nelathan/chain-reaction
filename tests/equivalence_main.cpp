@@ -2,13 +2,12 @@
 
 #include "../core/chain_reaction.hpp"
 
-static void load_fixture(GameState* game, const int* tokens, const int* owners, int count, int seen, int alive) {
+static void load_fixture(GameState* game, const int* tokens, const int* owners, int count, int alive) {
     cr_init(game);
     for (int i = 0; i < count; ++i) {
         game->tokens[i] = (int8_t)tokens[i];
         game->owners[i] = (int8_t)owners[i];
     }
-    game->players_seen_mask = (int8_t)seen;
     game->players_alive_mask = (int8_t)alive;
 }
 
@@ -35,8 +34,7 @@ static void print_case(const char* name, const GameState* game, int include_inva
         printf("%d", (int)game->owners[i]);
     }
 
-    printf("],\"playersSeenMask\":%d", (int)game->players_seen_mask);
-    printf(",\"playersAliveMask\":%d", (int)game->players_alive_mask);
+    printf("],\"playersAliveMask\":%d", (int)game->players_alive_mask);
     printf(",\"lastMoveExploded\":%d", (int)game->last_move_exploded);
     printf(",\"winner\":%d", (int)cr_get_winner(game));
     printf(",\"legalP1\":[");
@@ -99,42 +97,42 @@ int main(void) {
 
     const int opposing_tokens[] = {2, 0, 3};
     const int opposing_owners[] = {1, 0, 2};
-    load_fixture(&game, opposing_tokens, opposing_owners, 3, 3, 3);
+    load_fixture(&game, opposing_tokens, opposing_owners, 3, 3);
     cr_step(&game, 9, (int8_t)1);
     printf(",");
     print_case("opposing-pressure-cancels", &game, 0, 0);
 
     const int same_tokens[] = {2, 0, 3};
     const int same_owners[] = {1, 0, 1};
-    load_fixture(&game, same_tokens, same_owners, 3, 1, 1);
+    load_fixture(&game, same_tokens, same_owners, 3, 3);
     cr_step(&game, 9, (int8_t)1);
     printf(",");
     print_case("same-owner-pressure-stacks", &game, 0, 0);
 
     const int wait_tokens[] = {1, 0, 1, 0, 0, 0, 0, 0, 1};
     const int wait_owners[] = {1, 0, 1, 0, 0, 0, 0, 0, 1};
-    load_fixture(&game, wait_tokens, wait_owners, 9, 1, 1);
+    load_fixture(&game, wait_tokens, wait_owners, 9, 3);
     cr_step(&game, 1, (int8_t)1);
     printf(",");
     print_case("incoming-critical-waits-for-next-wave", &game, 0, 0);
 
     const int residual_tokens[] = {0, 3};
     const int residual_owners[] = {0, 1};
-    load_fixture(&game, residual_tokens, residual_owners, 2, 1, 1);
+    load_fixture(&game, residual_tokens, residual_owners, 2, 3);
     cr_step(&game, 1, (int8_t)1);
     printf(",");
     print_case("source-keeps-residual-owner", &game, 0, 0);
 
     const int clear_tokens[] = {0, 2};
     const int clear_owners[] = {0, 1};
-    load_fixture(&game, clear_tokens, clear_owners, 2, 1, 1);
+    load_fixture(&game, clear_tokens, clear_owners, 2, 3);
     cr_step(&game, 1, (int8_t)1);
     printf(",");
     print_case("source-clears-when-empty", &game, 0, 0);
 
     const int eliminate_tokens[] = {1, 1};
     const int eliminate_owners[] = {1, 2};
-    load_fixture(&game, eliminate_tokens, eliminate_owners, 2, 3, 3);
+    load_fixture(&game, eliminate_tokens, eliminate_owners, 2, 3);
     cr_step(&game, 0, (int8_t)1);
     printf(",");
     print_case("elimination-after-explosion", &game, 0, 0);

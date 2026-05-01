@@ -14,7 +14,7 @@ function getCase(name) {
   const item = getCase("first-move-no-winner");
   assert.equal(item.winner, 0);
   assert.equal(item.lastMoveExploded, 0);
-  assert.equal(item.playersAliveMask, 1);
+  assert.equal(item.playersAliveMask, 3);
 }
 
 {

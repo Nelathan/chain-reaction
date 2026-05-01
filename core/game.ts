@@ -9,7 +9,6 @@ export type FixtureCase = {
   name: string;
   tokens: number[];
   owners: number[];
-  playersSeenMask: number;
   playersAliveMask: number;
   lastMoveExploded: number;
   winner: number;
@@ -27,10 +26,8 @@ export class ChainReaction {
   private nextOwners: Int8Array;
   private pressure: Int8Array;
   turnCount: number;
-  playersSeenMask: number;
   playersAliveMask: number;
   lastMoveExploded: number;
-  winner: number;
 
   constructor() {
     this.tokens = new Int8Array(CELLS);
@@ -39,10 +36,8 @@ export class ChainReaction {
     this.nextOwners = new Int8Array(CELLS);
     this.pressure = new Int8Array(PLAYER_COUNT * CELLS);
     this.turnCount = 0;
-    this.playersSeenMask = 0;
-    this.playersAliveMask = 0;
+    this.playersAliveMask = this.allPlayersMask();
     this.lastMoveExploded = 0;
-    this.winner = 0;
   }
 
   reset(): void {
@@ -52,10 +47,8 @@ export class ChainReaction {
     this.nextOwners.fill(0);
     this.pressure.fill(0);
     this.turnCount = 0;
-    this.playersSeenMask = 0;
-    this.playersAliveMask = 0;
+    this.playersAliveMask = this.allPlayersMask();
     this.lastMoveExploded = 0;
-    this.winner = 0;
   }
 
   getMass(idx: number): number {
@@ -70,10 +63,8 @@ export class ChainReaction {
   isLegalMove(actionIdx: number, playerId: number): boolean {
     if (playerId < 1 || playerId > PLAYER_COUNT) return false;
     if (actionIdx < 0 || actionIdx >= CELLS) return false;
-    if (this.winner !== 0) return false;
-    if ((this.playersSeenMask & this.playerBit(playerId)) !== 0 && (this.playersAliveMask & this.playerBit(playerId)) === 0) {
-      return false;
-    }
+    if (this.getWinner() !== 0) return false;
+    if ((this.playersAliveMask & this.playerBit(playerId)) === 0) return false;
     return this.owners[actionIdx] === 0 || this.owners[actionIdx] === playerId;
   }
 
@@ -83,9 +74,7 @@ export class ChainReaction {
     this.tokens[actionIdx]++;
     this.owners[actionIdx] = playerId;
     this.turnCount++;
-    this.playersSeenMask |= this.playerBit(playerId);
     this.lastMoveExploded = 0;
-    this.winner = 0;
 
     let unstable = true;
     while (unstable) {
@@ -93,12 +82,13 @@ export class ChainReaction {
       if (unstable) this.lastMoveExploded = 1;
     }
 
-    this.updateAliveAndWinner();
+    if (this.lastMoveExploded !== 0) this.updateAliveMask();
     return true;
   }
 
   getWinner(): number {
-    return this.winner;
+    if (this.countBits(this.playersAliveMask) === 1) return this.maskToPlayer(this.playersAliveMask);
+    return 0;
   }
 
   writeLegalActions(playerId: number, out: Int8Array): void {
@@ -203,7 +193,7 @@ export class ChainReaction {
     }
   }
 
-  private updateAliveAndWinner(): void {
+  private updateAliveMask(): void {
     let alive = 0;
     for (let i = 0; i < CELLS; i++) {
       const owner = this.owners[i];
@@ -211,14 +201,14 @@ export class ChainReaction {
     }
 
     this.playersAliveMask = alive;
-
-    if (this.lastMoveExploded === 0) return;
-    if (this.countBits(this.playersSeenMask) < 2) return;
-    if (this.countBits(alive) === 1) this.winner = this.maskToPlayer(alive);
   }
 
   private playerBit(playerId: number): number {
     return 1 << (playerId - 1);
+  }
+
+  private allPlayersMask(): number {
+    return (1 << PLAYER_COUNT) - 1;
   }
 
   private countBits(mask: number): number {
@@ -246,42 +236,42 @@ export class ChainReaction {
 
   private static opposingPressureCancels(): FixtureCase {
     const game = new ChainReaction();
-    game.loadForFixture([2, 0, 3], [1, 0, 2], 0b11, 0b11);
+    game.loadForFixture([2, 0, 3], [1, 0, 2], 0b11);
     game.step(9, 1);
     return this.fixtureCase("opposing-pressure-cancels", game);
   }
 
   private static sameOwnerPressureStacks(): FixtureCase {
     const game = new ChainReaction();
-    game.loadForFixture([2, 0, 3], [1, 0, 1], 0b1, 0b1);
+    game.loadForFixture([2, 0, 3], [1, 0, 1], 0b11);
     game.step(9, 1);
     return this.fixtureCase("same-owner-pressure-stacks", game);
   }
 
   private static incomingCriticalWaitsForNextWave(): FixtureCase {
     const game = new ChainReaction();
-    game.loadForFixture([1, 0, 1, 0, 0, 0, 0, 0, 1], [1, 0, 1, 0, 0, 0, 0, 0, 1], 0b1, 0b1);
+    game.loadForFixture([1, 0, 1, 0, 0, 0, 0, 0, 1], [1, 0, 1, 0, 0, 0, 0, 0, 1], 0b11);
     game.step(1, 1);
     return this.fixtureCase("incoming-critical-waits-for-next-wave", game);
   }
 
   private static sourceKeepsResidualOwner(): FixtureCase {
     const game = new ChainReaction();
-    game.loadForFixture([0, 3], [0, 1], 0b1, 0b1);
+    game.loadForFixture([0, 3], [0, 1], 0b11);
     game.step(1, 1);
     return this.fixtureCase("source-keeps-residual-owner", game);
   }
 
   private static sourceClearsWhenEmpty(): FixtureCase {
     const game = new ChainReaction();
-    game.loadForFixture([0, 2], [0, 1], 0b1, 0b1);
+    game.loadForFixture([0, 2], [0, 1], 0b11);
     game.step(1, 1);
     return this.fixtureCase("source-clears-when-empty", game);
   }
 
   private static eliminationAfterExplosion(): FixtureCase {
     const game = new ChainReaction();
-    game.loadForFixture([1, 1], [1, 2], 0b11, 0b11);
+    game.loadForFixture([1, 1], [1, 2], 0b11);
     game.step(0, 1);
     return this.fixtureCase("elimination-after-explosion", game);
   }
@@ -307,7 +297,6 @@ export class ChainReaction {
       name,
       tokens: Array.from(game.tokens),
       owners: Array.from(game.owners),
-      playersSeenMask: game.playersSeenMask,
       playersAliveMask: game.playersAliveMask,
       lastMoveExploded: game.lastMoveExploded,
       winner: game.getWinner(),
@@ -318,13 +307,12 @@ export class ChainReaction {
     };
   }
 
-  private loadForFixture(tokens: number[], owners: number[], seen: number, alive: number): void {
+  private loadForFixture(tokens: number[], owners: number[], alive: number): void {
     this.reset();
     for (let i = 0; i < tokens.length; i++) {
       this.tokens[i] = tokens[i];
       this.owners[i] = owners[i];
     }
-    this.playersSeenMask = seen;
     this.playersAliveMask = alive;
   }
 }

@@ -10,8 +10,7 @@ def main():
     assert env.tokens[0] == 1
     assert env.owners[0] == 1
     assert env.turn_count == 1
-    assert env.players_seen_mask == 1
-    assert env.players_alive_mask == 1
+    assert env.players_alive_mask == 3
     assert env.last_move_exploded == 0
     assert env.get_winner() == 0
     assert env.legal_actions(2)[0] == 0
@@ -23,8 +22,7 @@ def main():
 
     env.reset()
     assert env.turn_count == 0
-    assert env.players_seen_mask == 0
-    assert env.players_alive_mask == 0
+    assert env.players_alive_mask == 3
     assert env.last_move_exploded == 0
     assert sum(env.tokens) == 0
     assert sum(env.owners) == 0

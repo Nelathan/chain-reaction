@@ -70,7 +70,8 @@ This is a deterministic, perfect-information variant of classic Atoms.
 - **Illegal move:** rejected deterministically; it must not partially mutate state.
 - **Explosion:** a critical cell sends one unit of pressure to each orthogonal neighbor.
 - **Turn boundary:** a single turn ends only when all cascade waves have stabilized.
-- **Win condition:** eliminations are transition-based. After a move that caused at least one explosion, the core recomputes the alive-player mask from board ownership. If only one previously seen player remains alive, that player wins. A placement without explosion cannot win.
+- **Alive state:** all participating players start alive. After a move that caused at least one explosion, the core recomputes the alive-player mask from board ownership. Players with no remaining tokens are eliminated and may not move.
+- **Win condition:** winner is interpretation, not stored simulation state. If the alive-player mask has exactly one bit set, that player has won. A placement without explosion does not recompute eliminations, so the opening transient is safe without a separate seen-player mask.
 
 ## Explosion Semantics
 
@@ -93,6 +94,14 @@ Any implementation that mutates a single board while scanning it must be treated
 Cells made critical by incoming pressure do not explode until the next wave. This keeps each wave graph-like: inputs are measured from one stable board, pressure is accumulated independently, and outputs become the next board.
 
 Opposing simultaneous pressure must not resolve by scan order. For the two-player MVP, equal opposing pressure cancels at the target. Unequal opposing pressure leaves only the net pressure, owned by the stronger side. This keeps engine iteration order from deciding ownership.
+
+For the MVP, cascades resolve until stable without a maximum wave guard. Infinite or very long cascades are accepted as part of the terrain rather than hidden behind an arbitrary cutoff. If this becomes a runtime problem, the fix must be explicit: expose a bounded stepping mode or error state, not silently alter physics.
+
+## Simulation vs Observation Schema
+
+The simulation schema is the source of truth: separate flat arrays for token counts and owner IDs. It can represent transient overfull cells during cascade resolution, such as a center with five tokens before the next wave consumes its critical mass.
+
+The observation schema is derived from stable simulation states for training: signed distance to explosion from the acting player's perspective. It is not the storage model and must not replace the simulation arrays. Consumers may read observations, but they must not infer or mutate game rules from them.
 
 ## Product Decisions
 

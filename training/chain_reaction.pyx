@@ -5,10 +5,8 @@ cdef extern from "../core/chain_reaction.hpp":
         signed char tokens[64]
         signed char owners[64]
         short turn_count
-        signed char players_seen_mask
         signed char players_alive_mask
         signed char last_move_exploded
-        signed char winner
 
     void cr_init(GameState* state) nogil
     int cr_step(GameState* state, int action_idx, signed char player_id) nogil
@@ -53,10 +51,6 @@ cdef class PyChainReaction:
     @property
     def turn_count(self):
         return self._state.turn_count
-
-    @property
-    def players_seen_mask(self):
-        return self._state.players_seen_mask
 
     @property
     def players_alive_mask(self):

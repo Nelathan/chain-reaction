@@ -10,14 +10,16 @@ struct GameState {
     int8_t tokens[CR_CELLS];
     int8_t owners[CR_CELLS];
     int16_t turn_count;
-    int8_t players_seen_mask;
     int8_t players_alive_mask;
     int8_t last_move_exploded;
-    int8_t winner;
 };
 
 inline int8_t cr_player_bit(int8_t player_id) {
     return (int8_t)(1 << (player_id - 1));
+}
+
+inline int8_t cr_all_players_mask(void) {
+    return (int8_t)((1 << CR_PLAYERS) - 1);
 }
 
 inline int cr_count_bits(int8_t mask) {
@@ -52,10 +54,8 @@ inline void cr_init(GameState* state) {
         state->owners[i] = 0;
     }
     state->turn_count = 0;
-    state->players_seen_mask = 0;
-    state->players_alive_mask = 0;
+    state->players_alive_mask = cr_all_players_mask();
     state->last_move_exploded = 0;
-    state->winner = 0;
 }
 
 inline void cr_copy_cells(int8_t* dst, const int8_t* src) {
@@ -73,11 +73,8 @@ inline void cr_zero_cells(int8_t* cells) {
 inline int cr_is_legal_move(const GameState* state, int action_idx, int8_t player_id) {
     if (player_id < 1 || player_id > CR_PLAYERS) return 0;
     if (action_idx < 0 || action_idx >= CR_CELLS) return 0;
-    if (state->winner != 0) return 0;
-    if ((state->players_seen_mask & cr_player_bit(player_id)) != 0 &&
-        (state->players_alive_mask & cr_player_bit(player_id)) == 0) {
-        return 0;
-    }
+    if (cr_count_bits(state->players_alive_mask) == 1) return 0;
+    if ((state->players_alive_mask & cr_player_bit(player_id)) == 0) return 0;
     return state->owners[action_idx] == 0 || state->owners[action_idx] == player_id;
 }
 
@@ -141,7 +138,7 @@ inline int cr_resolve_wave(GameState* state, int8_t* next_tokens, int8_t* next_o
     return 1;
 }
 
-inline void cr_update_alive_and_winner(GameState* state) {
+inline void cr_update_alive_mask(GameState* state) {
     int8_t alive = 0;
     for (int i = 0; i < CR_CELLS; ++i) {
         int8_t owner = state->owners[i];
@@ -149,10 +146,6 @@ inline void cr_update_alive_and_winner(GameState* state) {
     }
 
     state->players_alive_mask = alive;
-
-    if (state->last_move_exploded == 0) return;
-    if (cr_count_bits(state->players_seen_mask) < 2) return;
-    if (cr_count_bits(alive) == 1) state->winner = cr_mask_to_player(alive);
 }
 
 inline int cr_step(GameState* state, int action_idx, int8_t player_id) {
@@ -161,9 +154,7 @@ inline int cr_step(GameState* state, int action_idx, int8_t player_id) {
     state->tokens[action_idx]++;
     state->owners[action_idx] = player_id;
     state->turn_count++;
-    state->players_seen_mask |= cr_player_bit(player_id);
     state->last_move_exploded = 0;
-    state->winner = 0;
 
     int8_t next_tokens[CR_CELLS];
     int8_t next_owners[CR_CELLS];
@@ -173,12 +164,13 @@ inline int cr_step(GameState* state, int action_idx, int8_t player_id) {
         state->last_move_exploded = 1;
     }
 
-    cr_update_alive_and_winner(state);
+    if (state->last_move_exploded != 0) cr_update_alive_mask(state);
     return 1;
 }
 
 inline int8_t cr_get_winner(const GameState* state) {
-    return state->winner;
+    if (cr_count_bits(state->players_alive_mask) == 1) return cr_mask_to_player(state->players_alive_mask);
+    return 0;
 }
 
 inline void cr_write_legal_actions(const GameState* state, int8_t player_id, int8_t* out_actions) {
