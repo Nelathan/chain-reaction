@@ -68,9 +68,9 @@ This is a deterministic, perfect-information variant of classic Atoms.
 - **Critical mass:** corners explode at 2, edges at 3, center cells at 4.
 - **Legal move:** a player may increment an empty cell or a cell they already own.
 - **Illegal move:** rejected deterministically; it must not partially mutate state.
-- **Explosion:** a critical cell sends one token to each orthogonal neighbor and transfers those recipient cells to the exploding player's owner ID.
+- **Explosion:** a critical cell sends one unit of pressure to each orthogonal neighbor.
 - **Turn boundary:** a single turn ends only when all cascade waves have stabilized.
-- **Win condition:** after a completed cascade, the game ends when only one player's color remains on the board. The implementation must still protect the opening transient where only one player has placed any token; first move is not a win.
+- **Win condition:** eliminations are transition-based. After a move that caused at least one explosion, the core recomputes the alive-player mask from board ownership. If only one previously seen player remains alive, that player wins. A placement without explosion cannot win.
 
 ## Explosion Semantics
 
@@ -83,14 +83,16 @@ The required cascade loop shape is:
 1. copy or derive a clean next buffer from the current wave;
 2. mark all cells that are critical at the start of the wave;
 3. remove their critical mass simultaneously;
-4. distribute tokens to valid neighbors simultaneously;
-5. assign ownership to recipient cells from the exploding owner;
+4. collect outgoing pressure by recipient and owner;
+5. apply pressure simultaneously: same-owner pressure stacks, opposing two-player pressure cancels, and any nonzero net pressure adds tokens and captures the target for the net owner;
 6. swap buffers;
 7. repeat until no cells are critical.
 
 Any implementation that mutates a single board while scanning it must be treated as suspicious until proven equivalent. It probably is not. That little goblin has teeth.
 
-If opposing cells explode onto the same target during the same wave, ownership resolves by deterministic sweep order: top-left to bottom-right, with later scatters overwriting earlier ownership in the next buffer. This is not physically poetic, but it is stable, cheap, and equivalent across TypeScript and C++ as long as both implementations use the same scan order.
+Cells made critical by incoming pressure do not explode until the next wave. This keeps each wave graph-like: inputs are measured from one stable board, pressure is accumulated independently, and outputs become the next board.
+
+Opposing simultaneous pressure must not resolve by scan order. For the two-player MVP, equal opposing pressure cancels at the target. Unequal opposing pressure leaves only the net pressure, owned by the stronger side. This keeps engine iteration order from deciding ownership.
 
 ## Product Decisions
 

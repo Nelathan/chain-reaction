@@ -16,6 +16,8 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [ ] Add TypeScript fixtures for center critical mass.
 - [x] Add TypeScript fixtures for simultaneous multi-cell explosions.
 - [x] Add TypeScript fixtures for ownership transfer during cascades.
+- [x] Add TypeScript fixtures for opposing simultaneous pressure cancellation.
+- [x] Add TypeScript fixtures for source owner clearing and residual owner preservation.
 - [x] Add TypeScript fixtures for illegal moves.
 
 ## Phase 2 — Generate / Align C++ Header
@@ -27,8 +29,8 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Implement legal move validation in `core/chain_reaction.hpp`.
 - [x] Implement double-buffered simultaneous cascade resolution in `core/chain_reaction.hpp`.
 - [x] Implement winner detection in `core/chain_reaction.hpp`.
-- [ ] Implement signed-distance-to-explosion observation export in `core/chain_reaction.hpp`.
-- [ ] Implement legal-action mask export in `core/chain_reaction.hpp`.
+- [x] Implement signed-distance-to-explosion observation export in `core/chain_reaction.hpp`.
+- [x] Implement legal-action mask export in `core/chain_reaction.hpp`.
 - [x] Verify C++ fixtures match TypeScript fixtures.
 - [ ] Remove or quarantine any binding code that references stale core paths.
 
@@ -36,7 +38,7 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 
 - [x] Add `training/setup.py` for building the Cython extension.
 - [x] Replace stale `training/game.pyx` with `training/chain_reaction.pyx` including `core/chain_reaction.hpp`.
-- [ ] Expose reset, step, winner, legal-action mask, and observation methods through Cython.
+- [x] Expose reset, step, winner, legal-action mask, and observation methods through Cython.
 - [x] Expose reset, step, winner, token readout, owner readout, and turn count through Cython.
 - [ ] Implement a PufferLib environment wrapper.
 - [ ] Add a smoke test that instantiates multiple environments.

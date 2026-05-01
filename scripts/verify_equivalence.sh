@@ -11,6 +11,7 @@ CPP_JSON="$TMP_DIR/fixture.cpp.json"
 CPP_BIN="$TMP_DIR/equivalence_main"
 
 node "$ROOT_DIR/core/game.ts" > "$TS_JSON"
+node "$ROOT_DIR/tests/core_expected.mjs"
 c++ -std=c++11 -Wall -Wextra -Werror "$ROOT_DIR/tests/equivalence_main.cpp" -o "$CPP_BIN"
 "$CPP_BIN" > "$CPP_JSON"
 
