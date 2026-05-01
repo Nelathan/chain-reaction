@@ -1,0 +1,61 @@
+# OS/editor noise
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Logs and local environment
+*.log
+.env
+.env.*
+!.env.example
+
+# Node / TypeScript
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Python / Cython / training artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.dll
+*.dylib
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+cython_debug/
+
+# RL outputs
+runs/
+checkpoints/
+wandb/
+models/
+*.pt
+*.pth
+*.onnx
+
+# Native build products
+*.o
+*.obj
+*.a
+*.lib
+*.exp
+*.ilk
+*.pdb
+.sconsign.dblite
+
+# Godot generated files
+.godot/
+godot-cpp/bin/
+godot-cpp/gen/
+bin/
+export_presets.cfg
+*.import
