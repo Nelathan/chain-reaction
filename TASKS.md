@@ -34,11 +34,13 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 
 ## Phase 3 — Bind Cython / PufferLib
 
-- [ ] Add `training/setup.py` for building the Cython extension.
-- [ ] Update `training/game.pyx` to include `core/chain_reaction.hpp`.
+- [x] Add `training/setup.py` for building the Cython extension.
+- [x] Replace stale `training/game.pyx` with `training/chain_reaction.pyx` including `core/chain_reaction.hpp`.
 - [ ] Expose reset, step, winner, legal-action mask, and observation methods through Cython.
+- [x] Expose reset, step, winner, token readout, owner readout, and turn count through Cython.
 - [ ] Implement a PufferLib environment wrapper.
 - [ ] Add a smoke test that instantiates multiple environments.
+- [x] Add a smoke test that instantiates one environment and validates reset, legal move, illegal move, and readout behavior.
 - [ ] Add a smoke test that runs random legal self-play episodes.
 
 ## Phase 4 — Train Model

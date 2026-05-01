@@ -25,6 +25,7 @@ Only the C++ core owns runtime game behavior. Bindings expose it. Renderers disp
 - Preserve simultaneous explosion semantics through double-buffering.
 - Keep the C++ header zero-dependency beyond fixed-width C/C++ primitive headers.
 - Do not touch Godot or Python bindings until the C++ core is mathematically verified against the TypeScript prototype.
+- Use `uv` for Python dependency management, environments, builds, and test execution. Do not use ambient `python`, `pip`, or global site packages for repo work unless the user explicitly authorizes an exception.
 - Do not optimize visuals before the AI/training loop exists.
 
 ## Verification Order

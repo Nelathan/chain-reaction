@@ -32,6 +32,7 @@ __pycache__/
 .venv/
 venv/
 cython_debug/
+training/chain_reaction.cpp
 
 # RL outputs
 runs/
