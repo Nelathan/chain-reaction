@@ -90,6 +90,8 @@ The required cascade loop shape is:
 
 Any implementation that mutates a single board while scanning it must be treated as suspicious until proven equivalent. It probably is not. That little goblin has teeth.
 
+If opposing cells explode onto the same target during the same wave, ownership resolves by deterministic sweep order: top-left to bottom-right, with later scatters overwriting earlier ownership in the next buffer. This is not physically poetic, but it is stable, cheap, and equivalent across TypeScript and C++ as long as both implementations use the same scan order.
+
 ## Product Decisions
 
 We are optimizing for a one-day development cycle to reach a playable prototype.

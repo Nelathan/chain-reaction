@@ -4,32 +4,32 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 
 ## Phase 1 — Finalize TypeScript Prototype
 
-- [ ] Implement `ChainReaction.reset()` in `core/game.ts`.
-- [ ] Implement legal move validation in `core/game.ts`.
-- [ ] Implement `ChainReaction.step(actionIndex, playerId)` in `core/game.ts`.
-- [ ] Implement double-buffered simultaneous cascade resolution in `core/game.ts`.
-- [ ] Implement winner detection in `core/game.ts`.
-- [ ] Ensure winner detection does not treat the first placed token as a win.
+- [x] Implement `ChainReaction.reset()` in `core/game.ts`.
+- [x] Implement legal move validation in `core/game.ts`.
+- [x] Implement `ChainReaction.step(actionIndex, playerId)` in `core/game.ts`.
+- [x] Implement double-buffered simultaneous cascade resolution in `core/game.ts`.
+- [x] Implement winner detection in `core/game.ts`.
+- [x] Ensure winner detection does not treat the first placed token as a win.
 - [ ] Implement draw or max-turn handling in `core/game.ts`.
 - [ ] Add TypeScript fixtures for corner critical mass.
 - [ ] Add TypeScript fixtures for edge critical mass.
 - [ ] Add TypeScript fixtures for center critical mass.
-- [ ] Add TypeScript fixtures for simultaneous multi-cell explosions.
-- [ ] Add TypeScript fixtures for ownership transfer during cascades.
-- [ ] Add TypeScript fixtures for illegal moves.
+- [x] Add TypeScript fixtures for simultaneous multi-cell explosions.
+- [x] Add TypeScript fixtures for ownership transfer during cascades.
+- [x] Add TypeScript fixtures for illegal moves.
 
 ## Phase 2 — Generate / Align C++ Header
 
-- [ ] Replace `core/chain_reaction.hpp` stub with complete fixed-array implementation.
-- [ ] Define board constants in `core/chain_reaction.hpp`.
-- [ ] Define fixed-size token and owner arrays in `core/chain_reaction.hpp`.
-- [ ] Implement critical mass calculation in `core/chain_reaction.hpp`.
-- [ ] Implement legal move validation in `core/chain_reaction.hpp`.
-- [ ] Implement double-buffered simultaneous cascade resolution in `core/chain_reaction.hpp`.
-- [ ] Implement winner detection in `core/chain_reaction.hpp`.
+- [x] Replace `core/chain_reaction.hpp` stub with complete fixed-array implementation.
+- [x] Define board constants in `core/chain_reaction.hpp`.
+- [x] Define fixed-size token and owner arrays in `core/chain_reaction.hpp`.
+- [x] Implement critical mass calculation in `core/chain_reaction.hpp`.
+- [x] Implement legal move validation in `core/chain_reaction.hpp`.
+- [x] Implement double-buffered simultaneous cascade resolution in `core/chain_reaction.hpp`.
+- [x] Implement winner detection in `core/chain_reaction.hpp`.
 - [ ] Implement signed-distance-to-explosion observation export in `core/chain_reaction.hpp`.
 - [ ] Implement legal-action mask export in `core/chain_reaction.hpp`.
-- [ ] Verify C++ fixtures match TypeScript fixtures.
+- [x] Verify C++ fixtures match TypeScript fixtures.
 - [ ] Remove or quarantine any binding code that references stale core paths.
 
 ## Phase 3 — Bind Cython / PufferLib
