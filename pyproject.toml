@@ -11,3 +11,8 @@ dev = [
     "setuptools>=69",
     "wheel>=0.42",
 ]
+training = [
+    "gymnasium>=1.0",
+    "numpy>=1.26",
+    "pufferlib @ git+https://github.com/PufferAI/PufferLib.git@4.0",
+]

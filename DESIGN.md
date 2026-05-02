@@ -129,6 +129,7 @@ Training starts from scratch. No human data, supervised fine-tuning, GANs, or th
 - **Action masking:** illegal moves are masked before softmax by setting their logits or log probabilities to negative infinity. Compute goes toward strategy, not relearning legality.
 - **History:** none. The game is Markovian; the current board contains the required state.
 - **Episode cap:** training may use a high maximum step count to keep batches finite. Hitting that cap is a harness truncation signal, not a core draw condition.
+- **PufferLib v4 integration:** training uses PufferLib's Ocean native environment contract, not the legacy Python `PufferEnv` wrapper. The Chain Reaction Ocean scaffold includes the shared C++ core and can be built through a PufferLib 4.0 source checkout with `build.sh chain_reaction --cpu` on macOS or the CUDA backend on the workstation.
 
 ## Neural Network Shape
 

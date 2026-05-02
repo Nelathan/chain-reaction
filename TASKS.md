@@ -40,8 +40,8 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Replace stale `training/game.pyx` with `training/chain_reaction.pyx` including `core/chain_reaction.hpp`.
 - [x] Expose reset, step, winner, legal-action mask, and observation methods through Cython.
 - [x] Expose reset, step, winner, token readout, owner readout, and turn count through Cython.
-- [x] Implement a PufferLib environment wrapper.
-- [x] Add a smoke test that instantiates multiple environments.
+- [x] Add a PufferLib v4 Ocean environment scaffold.
+- [x] Verify the PufferLib v4 Ocean scaffold builds as a CPU backend on macOS.
 - [x] Add a smoke test that instantiates one environment and validates reset, legal move, illegal move, and readout behavior.
 - [x] Add a smoke test that runs random legal self-play episodes.
 
