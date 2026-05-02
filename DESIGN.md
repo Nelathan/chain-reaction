@@ -70,9 +70,11 @@ This is a deterministic, perfect-information variant of classic Atoms.
 - **Legal move:** a player may increment an empty cell or a cell they already own.
 - **Illegal move:** rejected deterministically; it must not partially mutate state.
 - **Explosion:** a critical cell sends one unit of pressure to each orthogonal neighbor.
-- **Turn boundary:** a single turn ends only when all cascade waves have stabilized.
+- **Player turns:** players act one at a time. The acting player chooses one legal field, the full cascade resolves to a stable board, then the next player acts. Simultaneity is a cascade-wave property, not simultaneous player action selection.
+- **Turn boundary:** a single turn ends when all cascade waves have stabilized or when a wave leaves exactly one player with tokens. Elimination is terminal; the core does not continue resolving owner-only fireworks after the opponent is gone.
 - **Alive state:** all participating players start alive. After a move that caused at least one explosion, the core recomputes the alive-player mask from board ownership. Players with no remaining tokens are eliminated and may not move.
 - **Win condition:** winner is interpretation, not stored simulation state. If the alive-player mask has exactly one bit set, that player has won. A placement without explosion does not recompute eliminations, so the opening transient is safe without a separate seen-player mask.
+- **No draw/max-turn rule:** core gameplay allows unbounded play. Training harnesses may impose high episode caps for batch hygiene, but that is truncation, not a game-rule draw.
 
 ## Explosion Semantics
 
@@ -88,7 +90,8 @@ The required cascade loop shape is:
 4. collect outgoing pressure by recipient and owner;
 5. apply pressure simultaneously: same-owner pressure stacks, opposing two-player pressure cancels, and any nonzero net pressure adds tokens and captures the target for the net owner;
 6. swap buffers;
-7. repeat until no cells are critical.
+7. if exactly one player owns tokens after the wave, stop and declare that player the winner;
+8. otherwise repeat until no cells are critical.
 
 Any implementation that mutates a single board while scanning it must be treated as suspicious until proven equivalent. It probably is not. That little goblin has teeth.
 
@@ -96,7 +99,9 @@ Cells made critical by incoming pressure do not explode until the next wave. Thi
 
 Opposing simultaneous pressure must not resolve by scan order. For the two-player MVP, equal opposing pressure cancels at the target. Unequal opposing pressure leaves only the net pressure, owned by the stronger side. This keeps engine iteration order from deciding ownership.
 
-For the MVP, cascades resolve until stable without a maximum wave guard. Infinite or very long cascades are accepted as part of the terrain rather than hidden behind an arbitrary cutoff. If this becomes a runtime problem, the fix must be explicit: expose a bounded stepping mode or error state, not silently alter physics.
+In normal alternating legal play, stable boards should not contain opponent-owned critical cells waiting to explode. The opposing-pressure fixtures still matter: they verify the wave resolver as a mathematical transform over arbitrary wave states and protect symmetry under board rotations/flips instead of only testing common reachable trajectories.
+
+For the MVP, cascades resolve until stable or terminal elimination without a maximum wave guard. Infinite or very long cascades before elimination are accepted as part of the terrain rather than hidden behind an arbitrary cutoff. If this becomes a runtime problem, the fix must be explicit: expose a bounded stepping mode or error state, not silently alter physics.
 
 The core can record a fixed-size cascade flight recorder for the most recent move through `cr_step_with_log`: per-wave exploding source cells plus the post-wave token and owner arrays. The plain `cr_step` path stays lean for training throughput. If a cascade exceeds `CR_MAX_LOGGED_WAVES`, simulation still resolves to stability; only the log truncates and sets `wave_log_truncated`. A visualization cap must never become a physics cap by accident.
 
@@ -123,6 +128,7 @@ Training starts from scratch. No human data, supervised fine-tuning, GANs, or th
 - **League:** one current policy trains against a history pool of older checkpoints. We do not merge models; we sample past selves to prevent catastrophic forgetting.
 - **Action masking:** illegal moves are masked before softmax by setting their logits or log probabilities to negative infinity. Compute goes toward strategy, not relearning legality.
 - **History:** none. The game is Markovian; the current board contains the required state.
+- **Episode cap:** training may use a high maximum step count to keep batches finite. Hitting that cap is a harness truncation signal, not a core draw condition.
 
 ## Neural Network Shape
 

@@ -39,6 +39,10 @@ cdef class PyChainReaction:
     def step(self, int action_idx, int player_id):
         return cr_step_with_log(&self._state, &self._wave_log, action_idx, <signed char>player_id)
 
+    def step_fast(self, int action_idx, int player_id):
+        cr_init_wave_log(&self._wave_log)
+        return cr_step(&self._state, action_idx, <signed char>player_id)
+
     def get_winner(self):
         return cr_get_winner(&self._state)
 

@@ -97,7 +97,11 @@ export class ChainReaction {
     let unstable = true;
     while (unstable) {
       unstable = this.resolveWave();
-      if (unstable) this.lastMoveExploded = 1;
+      if (unstable) {
+        this.lastMoveExploded = 1;
+        this.updateAliveMask();
+        if (this.getWinner() !== 0) break;
+      }
     }
 
     if (this.lastMoveExploded !== 0) this.updateAliveMask();
@@ -148,6 +152,7 @@ export class ChainReaction {
       this.sourceKeepsResidualOwner(),
       this.sourceClearsWhenEmpty(),
       this.eliminationAfterExplosion(),
+      this.eliminationBeforeStability(),
       this.criticalMassCorner(),
       this.criticalMassEdge(),
       this.criticalMassCenter(),
@@ -319,6 +324,17 @@ export class ChainReaction {
     game.loadForFixture([1, 1], [1, 2], 0b11);
     game.step(0, 1);
     return this.fixtureCase("elimination-after-explosion", game);
+  }
+
+  private static eliminationBeforeStability(): FixtureCase {
+    const game = new ChainReaction();
+    game.loadForFixture(
+      [1, 2, 2, 1, 1, 1, 2, 1, 2, 3, 1, 3, 2, 0, 3, 2, 1, 3, 3, 2, 3, 3, 0, 2, 0, 1, 3, 0, 1, 3, 3, 2, 2, 3, 2, 1, 3, 0, 1, 2, 2, 3, 2, 2, 3, 3, 3, 2, 2, 0, 3, 3, 3, 1, 3, 2, 0, 2, 1, 1, 2, 0, 1, 1],
+      [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 2, 2, 2, 2, 2, 2, 2, 2, 0, 2, 0, 2, 2, 0, 2, 2, 2, 1, 2, 2, 2, 2, 2, 0, 2, 1, 2, 2, 2, 2, 2, 2, 1, 1, 2, 0, 2, 2, 2, 2, 2, 2, 0, 2, 2, 2, 2, 0, 2, 2],
+      0b11,
+    );
+    game.step(31, 1);
+    return this.fixtureCase("elimination-before-stability", game);
   }
 
   private static criticalMassCorner(): FixtureCase {

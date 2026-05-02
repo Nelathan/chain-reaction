@@ -202,6 +202,8 @@ inline int cr_step_internal(GameState* state, WaveLog* log, int action_idx, int8
 
     while (cr_resolve_wave(state, log, next_tokens, next_owners, pressure, exploded_cells)) {
         state->last_move_exploded = 1;
+        cr_update_alive_mask(state);
+        if (cr_count_bits(state->players_alive_mask) == 1) break;
     }
 
     if (state->last_move_exploded != 0) cr_update_alive_mask(state);

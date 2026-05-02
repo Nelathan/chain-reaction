@@ -22,6 +22,11 @@ def main():
     assert env.tokens[0] == 1
     assert env.owners[0] == 1
 
+    assert env.step_fast(1, 2) == 1
+    assert env.tokens[1] == 1
+    assert env.owners[1] == 2
+    assert env.wave_count == 0
+
     env.reset()
     assert env.step(0, 1) == 1
     assert env.step(0, 1) == 1

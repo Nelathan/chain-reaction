@@ -136,6 +136,23 @@ int main(void) {
     printf(",");
     print_case("elimination-after-explosion", &game, &log, 0, 0);
 
+    const int eliminate_before_stability_tokens[] = {
+        1, 2, 2, 1, 1, 1, 2, 1, 2, 3, 1, 3, 2, 0, 3, 2,
+        1, 3, 3, 2, 3, 3, 0, 2, 0, 1, 3, 0, 1, 3, 3, 2,
+        2, 3, 2, 1, 3, 0, 1, 2, 2, 3, 2, 2, 3, 3, 3, 2,
+        2, 0, 3, 3, 3, 1, 3, 2, 0, 2, 1, 1, 2, 0, 1, 1,
+    };
+    const int eliminate_before_stability_owners[] = {
+        2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 0, 2, 2,
+        2, 2, 2, 2, 2, 2, 0, 2, 0, 2, 2, 0, 2, 2, 2, 1,
+        2, 2, 2, 2, 2, 0, 2, 1, 2, 2, 2, 2, 2, 2, 1, 1,
+        2, 0, 2, 2, 2, 2, 2, 2, 0, 2, 2, 2, 2, 0, 2, 2,
+    };
+    load_fixture(&game, eliminate_before_stability_tokens, eliminate_before_stability_owners, CR_CELLS, 3);
+    cr_step_with_log(&game, &log, 31, (int8_t)1);
+    printf(",");
+    print_case("elimination-before-stability", &game, &log, 0, 0);
+
     const int corner_tokens[] = {1};
     const int corner_owners[] = {1};
     load_fixture(&game, corner_tokens, corner_owners, 1, 3);

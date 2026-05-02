@@ -22,3 +22,13 @@ Chronological ledger. Record why changes happened, not just what changed.
 - Accepted unbounded cascade resolution for the MVP. Any future wave cap must be an explicit bounded-mode/error-state design, not a quiet physics change.
 - Added explicit corner, edge, and center critical-mass fixtures. The MVP keeps the 8x8 chessboard shape, and these tests pin the geometry before renderer or training consumers build assumptions on top of it.
 - Added a fixed-size per-move wave log to the shared core and Cython bridge. Rendering can now animate actual simultaneous cascade waves without re-simulating rules, while simulation remains unbounded; only the inspection log can truncate.
+
+## 2026-05-02
+
+- Rejected core draw/max-turn handling. Chain Reaction gameplay remains unbounded; training may use a high episode cap as harness-level truncation only, so batch management cannot silently become physics.
+- Marked the corner, edge, and center critical-mass fixture tasks complete now that the latest verification work includes them.
+- Added the first PufferLib-style Python wrapper around the Cython core. It exposes one acting agent with alternating player perspective, core-owned legal masks, signed-distance observations as `float32`, and harness-level max-turn truncation without adding draw physics.
+- Clarified that turns are alternating while cascade waves are simultaneous. Opposing-pressure cancellation fixtures remain as mathematical symmetry checks for the resolver, even when ordinary stable-turn play rarely reaches those arbitrary wave states.
+- Added a random legal self-play smoke test against the Cython core. The test samples only from core-owned legal masks and expects episodes to reach a real winner before the smoke-test harness cap.
+- Split the Cython bridge into logged and fast stepping paths. Rendering/debug consumers can keep `step()` wave logs, while training uses `step_fast()` so rollout throughput does not pay for cascade inspection buffers.
+- Changed cascade terminal semantics to stop after any simultaneous wave that leaves exactly one player with tokens. A legal random self-play rollout exposed a period-26 owner-only cascade after P2 had already been eliminated; winner detection now terminates the turn at elimination instead of requiring post-victory physics to stabilize.

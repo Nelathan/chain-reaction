@@ -96,6 +96,15 @@ function getCase(name) {
 }
 
 {
+  const item = getCase("elimination-before-stability");
+  assert.equal(item.lastMoveExploded, 1);
+  assert.equal(item.playersAliveMask, 1);
+  assert.equal(item.winner, 1);
+  assert.equal(item.waveCount, 18);
+  assert.equal(item.waveLogTruncated, 0);
+}
+
+{
   const item = getCase("invalid-move-does-not-mutate");
   assert.equal(item.invalidMoveAccepted, false);
   assert.equal(item.tokens[0], 1);

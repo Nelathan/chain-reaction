@@ -10,10 +10,10 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Implement double-buffered simultaneous cascade resolution in `core/game.ts`.
 - [x] Implement winner detection in `core/game.ts`.
 - [x] Ensure winner detection does not treat the first placed token as a win.
-- [ ] Implement draw or max-turn handling in `core/game.ts`.
-- [ ] Add TypeScript fixtures for corner critical mass.
-- [ ] Add TypeScript fixtures for edge critical mass.
-- [ ] Add TypeScript fixtures for center critical mass.
+- [x] Record that core gameplay has no draw or max-turn handling; training may impose an episode cap.
+- [x] Add TypeScript fixtures for corner critical mass.
+- [x] Add TypeScript fixtures for edge critical mass.
+- [x] Add TypeScript fixtures for center critical mass.
 - [x] Add TypeScript fixtures for simultaneous multi-cell explosions.
 - [x] Add TypeScript fixtures for ownership transfer during cascades.
 - [x] Add TypeScript fixtures for opposing simultaneous pressure cancellation.
@@ -40,10 +40,10 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Replace stale `training/game.pyx` with `training/chain_reaction.pyx` including `core/chain_reaction.hpp`.
 - [x] Expose reset, step, winner, legal-action mask, and observation methods through Cython.
 - [x] Expose reset, step, winner, token readout, owner readout, and turn count through Cython.
-- [ ] Implement a PufferLib environment wrapper.
-- [ ] Add a smoke test that instantiates multiple environments.
+- [x] Implement a PufferLib environment wrapper.
+- [x] Add a smoke test that instantiates multiple environments.
 - [x] Add a smoke test that instantiates one environment and validates reset, legal move, illegal move, and readout behavior.
-- [ ] Add a smoke test that runs random legal self-play episodes.
+- [x] Add a smoke test that runs random legal self-play episodes.
 
 ## Phase 4 — Train Model
 
