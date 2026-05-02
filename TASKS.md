@@ -48,11 +48,16 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 ## Phase 4 — Train Model
 
 - [ ] Define the single-channel signed-distance-to-explosion observation tensor.
+- [ ] Implement illegal-action masking before softmax.
+- [ ] Build the PufferLib v4 Ocean environment on the CUDA workstation or PufferTank Docker.
+- [ ] Run one tiny end-to-end PufferLib training job from reset to saved checkpoint.
+- [ ] Load a saved checkpoint and run an evaluation rollout.
 - [ ] Implement single-policy self-play.
 - [ ] Implement history-pool opponent sampling.
-- [ ] Implement illegal-action masking before softmax.
-- [ ] Train a tiny CNN baseline.
+- [ ] Train a tiny CNN baseline beyond smoke-test scale.
 - [ ] Save model checkpoints.
+- [ ] Add rollout metrics for win rate, episode length, illegal-action rate, cascade depth, and truncation count.
+- [ ] Add a CLI/TUI replay viewer for policy/debug inspection before Godot integration.
 - [ ] Export an inference artifact usable by Godot.
 
 ## Phase 5 — Bind Godot GDExtension

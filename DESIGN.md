@@ -130,10 +130,14 @@ Training starts from scratch. No human data, supervised fine-tuning, GANs, or th
 - **History:** none. The game is Markovian; the current board contains the required state.
 - **Episode cap:** training may use a high maximum step count to keep batches finite. Hitting that cap is a harness truncation signal, not a core draw condition.
 - **PufferLib v4 integration:** training uses PufferLib's Ocean native environment contract, not the legacy Python `PufferEnv` wrapper. The Chain Reaction Ocean scaffold includes the shared C++ core and can be built through a PufferLib 4.0 source checkout with `build.sh chain_reaction --cpu` on macOS or the CUDA backend on the workstation.
+- **Development target:** first meaningful training belongs on the CUDA workstation or PufferTank Docker, not the M1 laptop. The laptop is for rule verification, Cython smoke tests, and occasional CPU build probes. Do not tune the neural net around macOS CPU constraints.
+- **Next product loop:** prove one minimal end-to-end training run before polishing presentation. After the first checkpoint can be trained, saved, and loaded, build a cheap CLI/TUI replay/debug viewer before Godot so policy behavior, legal masks, rewards, terminal states, and cascade depths are inspectable without renderer ceremony.
 
 ## Neural Network Shape
 
 The first model should be microscopic and spatially honest.
+
+The first training run should use this boring baseline unchanged unless it cannot execute. Its job is to prove the full data path, not to be strong. Tune architecture only after rollout collection, legal masking, rewards, checkpointing, and policy inspection are visibly working.
 
 - **Input:** `(Batch, 1, 8, 8)` signed-distance-to-explosion channel.
 - **Backbone:** `Conv2d(1, 32, kernel=3)` -> `ReLU` -> `Conv2d(32, 64, kernel=3)` -> `ReLU`.
