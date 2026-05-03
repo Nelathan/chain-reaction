@@ -18,4 +18,6 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "score", log->score);
     dict_set(out, "episode_return", log->episode_return);
     dict_set(out, "episode_length", log->episode_length);
+    dict_set(out, "n", log->n);
+    dict_set(out, "illegal_moves", log->illegal_moves);
 }

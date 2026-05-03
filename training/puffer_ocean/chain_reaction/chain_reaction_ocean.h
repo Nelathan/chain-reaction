@@ -17,6 +17,7 @@ typedef struct {
     float episode_return;
     float episode_length;
     float n;
+    float illegal_moves;
 } Log;
 
 typedef struct {
@@ -67,6 +68,7 @@ void c_step(ChainReactionOcean* env) {
     int action = (int)env->actions[0];
     int ok = cr_step(&env->state, action, (int8_t)env->current_player);
     if (ok != 1) {
+        env->log.illegal_moves += 1.0f;
         env->rewards[0] = -1.0f;
         env->terminals[0] = 1.0f;
         cr_ocean_add_log(env, env->rewards[0]);
