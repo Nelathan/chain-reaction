@@ -8,7 +8,7 @@
 typedef struct GameState GameState;
 typedef struct WaveLog WaveLog;
 #define inline static inline
-#include "core/chain_reaction.hpp"
+#include "chain_reaction_core/chain_reaction.hpp"
 #undef inline
 
 typedef struct {
@@ -48,12 +48,16 @@ static inline void cr_ocean_add_log(ChainReactionOcean* env, float reward) {
     env->log.n += 1.0f;
 }
 
-void c_reset(ChainReactionOcean* env) {
+static inline void cr_ocean_reset_state(ChainReactionOcean* env) {
     cr_init(&env->state);
     env->current_player = 1;
+    cr_ocean_write_observation(env);
+}
+
+void c_reset(ChainReactionOcean* env) {
+    cr_ocean_reset_state(env);
     env->rewards[0] = 0.0f;
     env->terminals[0] = 0.0f;
-    cr_ocean_write_observation(env);
 }
 
 void c_step(ChainReactionOcean* env) {
@@ -66,7 +70,7 @@ void c_step(ChainReactionOcean* env) {
         env->rewards[0] = -1.0f;
         env->terminals[0] = 1.0f;
         cr_ocean_add_log(env, env->rewards[0]);
-        c_reset(env);
+        cr_ocean_reset_state(env);
         return;
     }
 
@@ -75,14 +79,14 @@ void c_step(ChainReactionOcean* env) {
         env->rewards[0] = winner == env->current_player ? 1.0f : -1.0f;
         env->terminals[0] = 1.0f;
         cr_ocean_add_log(env, env->rewards[0]);
-        c_reset(env);
+        cr_ocean_reset_state(env);
         return;
     }
 
     if (env->max_turns > 0 && env->state.turn_count >= env->max_turns) {
         env->terminals[0] = 1.0f;
         cr_ocean_add_log(env, 0.0f);
-        c_reset(env);
+        cr_ocean_reset_state(env);
         return;
     }
 

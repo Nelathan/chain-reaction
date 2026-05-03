@@ -38,6 +38,7 @@ training/chain_reaction.cpp
 # RL outputs
 runs/
 checkpoints/
+/training/logs/
 wandb/
 models/
 *.pt

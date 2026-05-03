@@ -1,0 +1,8 @@
+services:
+  puffer:
+    # Podman exposes NVIDIA GPUs through CDI. If this is unresolved, generate
+    # the CDI spec with nvidia-ctk before running the training container.
+    devices:
+      - nvidia.com/gpu=all
+    security_opt:
+      - label=disable

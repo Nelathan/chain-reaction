@@ -47,10 +47,11 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 
 ## Phase 4 — Train Model
 
+- [x] Add PufferTank 4.0 Compose wiring for the Fedora CUDA workstation.
+- [x] Build the PufferLib v4 Ocean environment on the CUDA workstation through PufferTank.
+- [x] Run one tiny end-to-end PufferLib training job from reset to saved checkpoint.
 - [ ] Define the single-channel signed-distance-to-explosion observation tensor.
 - [ ] Implement illegal-action masking before softmax.
-- [ ] Build the PufferLib v4 Ocean environment on the CUDA workstation or PufferTank Docker.
-- [ ] Run one tiny end-to-end PufferLib training job from reset to saved checkpoint.
 - [ ] Load a saved checkpoint and run an evaluation rollout.
 - [ ] Implement single-policy self-play.
 - [ ] Implement history-pool opponent sampling.
