@@ -32,7 +32,7 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Implement signed-distance-to-explosion observation export in `core/chain_reaction.hpp`.
 - [x] Implement legal-action mask export in `core/chain_reaction.hpp`.
 - [x] Verify C++ fixtures match TypeScript fixtures.
-- [ ] Remove or quarantine any binding code that references stale core paths.
+- [x] Remove or quarantine any binding code that references stale core paths.
 
 ## Phase 3 — Bind Cython / PufferLib
 
@@ -55,12 +55,18 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Implement the 32-channel residual CNN policy/value model.
 - [x] Implement illegal-action masking before softmax.
 - [x] Implement negamax/sign-aware GAE for alternating current-player-perspective turns.
+- [x] Fork PufferLib v4 as a repo submodule (`vendor/PufferLib`, branch `chain-reaction-native`).
+- [x] Hardcode Chain Reaction legal action mask (`obs >= 0`) in native CUDA `sample_logits`, `ppo_discrete_head`, and policy-gradient kernels.
+- [x] Hardcode negamax alternating-turn GAE (`r - gamma*V(next)`, `-gamma*lambda*next_adv`) in native CUDA advantage kernels.
+- [x] Verify legal mask at env level: `--log.illegal_moves` counter confirmed 0.000 in PufferTank training runs.
+- [x] Implement zero-sum self-play reward convention: log both winner (+1) and loser (-1) as separate PufferLib entries per game.
+- [x] Add player-1-perspective winrate stat (`--log.winrate`) for skill tracking in the Ocean env dashboard.
 - [ ] Load a saved checkpoint and run an evaluation rollout.
-- [ ] Implement single-policy self-play.
+- [x] Implement single-policy self-play.
 - [ ] Implement history-pool opponent sampling.
 - [ ] Train a tiny CNN baseline beyond smoke-test scale.
 - [x] Save model checkpoints.
-- [ ] Add rollout metrics for win rate, episode length, illegal-action rate, cascade depth, and truncation count.
+- [x] Add rollout metrics for win rate, episode length, illegal-action rate, cascade depth, and truncation count.
 - [ ] Add a CLI/TUI replay viewer for policy/debug inspection before Godot integration.
 - [ ] Export an inference artifact usable by Godot.
 
