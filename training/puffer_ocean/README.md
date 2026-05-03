@@ -15,7 +15,45 @@ EXTRA_CFLAGS="-I/path/to/chain-reaction" bash build.sh chain_reaction --cpu
 
 On the current M1 setup, PufferLib's stock macOS `build.sh` needed local compiler flag tweaks for Homebrew GCC/OpenMP. Those tweaks belong upstream or in local setup notes, not in this repository's game core.
 
-The preferred first real training target is the CUDA workstation using PufferTank Docker or a native PufferLib 4.0 checkout. The trainer and environment run in the same process against the compiled `pufferlib._C` module; there is no HTTP boundary between trainer and environment in the normal PufferLib v4 path. Mount or copy this repository into the container/workspace, expose this Ocean env inside the PufferLib checkout, build, then train there.
+The preferred first real training target is the CUDA workstation using PufferTank Docker / Podman with this repo's PufferLib submodule fork.
+
+## Native trainer fidelity contract
+
+This repository vendors PufferLib v4 as a git submodule at `vendor/PufferLib` with a
+`chain-reaction-native` branch carrying two semantic patches to `src/pufferlib.cu`:
+
+- **Legal action masking**: illegal (opponent-owned) cells are masked out of rollout
+  sampling, PPO logprob/entropy, and policy-gradient calculation. The mask is derived
+  from the current-player-relative observation: `obs >= 0`.
+- **Negamax GAE**: `V(s)` is from the player-to-move perspective, so nonterminal
+  advantage bootstraps with sign flips: `r - gamma * V(next)` and
+  `- gamma * lambda * next_advantage`.
+
+There are no runtime conditionals; this fork is single-purpose for Chain Reaction.
+The Torch reference model at `training/torch_ppo/model.py` and fixtures remain as
+readable reference until the native trainer is verified against them.
+
+## PufferTank + submodule build
+
+```bash
+# From repo root:
+git submodule init
+git submodule update
+cd vendor/PufferLib && git checkout chain-reaction-native && cd ../..
+
+# Podman:
+podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer
+
+# Docker:
+docker compose -f compose.yaml -f compose.docker.yaml run --rm puffer
+
+# Build-only smoke (skips training):
+BUILD_ONLY=1 podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer
+```
+
+The compose mounts the repo at `/workspace/chain-reaction` inside the container,
+uses the submodule as `PUFFER_ROOT`, and runs `puffertank_train.sh` which builds
+the environment and launches training via `python -m pufferlib.pufferl`.
 
 Do not regress to PyPI `pufferlib==3.0.0` for convenience. That package exposes a different integration API and would rot the v4 contract.
 

@@ -3,10 +3,11 @@ name: chain-reaction-puffer
 services:
   puffer:
     image: ${PUFFER_IMAGE:-docker.io/pufferai/puffertank:4.0}
-    working_dir: /puffertank/pufferlib
+    working_dir: /workspace/chain-reaction/vendor/PufferLib
     shm_size: "8gb"
     environment:
       CHAIN_REACTION_REPO: /workspace/chain-reaction
+      PUFFER_ROOT: /workspace/chain-reaction/vendor/PufferLib
       CHAIN_REACTION_TRAIN_TIMEOUT: ${CHAIN_REACTION_TRAIN_TIMEOUT:-10m}
       CHAIN_REACTION_TOTAL_TIMESTEPS: ${CHAIN_REACTION_TOTAL_TIMESTEPS:-4000000000}
       CHAIN_REACTION_CHECKPOINT_INTERVAL: ${CHAIN_REACTION_CHECKPOINT_INTERVAL:-200}
@@ -14,26 +15,14 @@ services:
       CHAIN_REACTION_MINIBATCH_SIZE: ${CHAIN_REACTION_MINIBATCH_SIZE:-32768}
       CHAIN_REACTION_HORIZON: ${CHAIN_REACTION_HORIZON:-64}
       CHAIN_REACTION_MAX_TURNS: ${CHAIN_REACTION_MAX_TURNS:-4096}
-      CHAIN_REACTION_WANDB: ${CHAIN_REACTION_WANDB:-0}
-      CHAIN_REACTION_WANDB_PROJECT: ${CHAIN_REACTION_WANDB_PROJECT:-chain-reaction}
-      CHAIN_REACTION_WANDB_GROUP: ${CHAIN_REACTION_WANDB_GROUP:-torch-ppo}
-      CHAIN_REACTION_WANDB_ENTITY: ${CHAIN_REACTION_WANDB_ENTITY:-}
-      CHAIN_REACTION_WANDB_NAME: ${CHAIN_REACTION_WANDB_NAME:-}
-      CHAIN_REACTION_WANDB_TAGS: ${CHAIN_REACTION_WANDB_TAGS:-}
-      CHAIN_REACTION_WANDB_MODE: ${CHAIN_REACTION_WANDB_MODE:-}
-      CHAIN_REACTION_WANDB_BASE_URL: ${CHAIN_REACTION_WANDB_BASE_URL:-}
-      CHAIN_REACTION_LOG_INTERVAL: ${CHAIN_REACTION_LOG_INTERVAL:-10}
-      CHAIN_REACTION_COMPILE_MODEL: ${CHAIN_REACTION_COMPILE_MODEL:-1}
-      CHAIN_REACTION_COMPILE_MODE: ${CHAIN_REACTION_COMPILE_MODE:-default}
-      CHAIN_REACTION_SYNC_GPU_STEP: ${CHAIN_REACTION_SYNC_GPU_STEP:-0}
       WANDB_API_KEY: ${WANDB_API_KEY:-}
       BUILD_ONLY: ${BUILD_ONLY:-0}
       PUFFER_BUILD_ARGS: ${PUFFER_BUILD_ARGS:-}
       EXTRA_CFLAGS: -I/workspace/chain-reaction
     volumes:
       - .:/workspace/chain-reaction:Z
-      - ./training/checkpoints:/puffertank/pufferlib/checkpoints:Z
-      - ./training/logs:/puffertank/pufferlib/logs:Z
+      - ./training/checkpoints:/workspace/chain-reaction/vendor/PufferLib/checkpoints:Z
+      - ./training/logs:/workspace/chain-reaction/vendor/PufferLib/logs:Z
     command:
       - bash
       - /workspace/chain-reaction/training/puffer_ocean/puffertank_train.sh
