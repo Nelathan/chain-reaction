@@ -18,6 +18,8 @@ typedef struct {
     float episode_length;
     float n;
     float illegal_moves;
+    float p1_wins;
+    float p1_games;
 } Log;
 
 typedef struct {
@@ -68,19 +70,32 @@ void c_step(ChainReactionOcean* env) {
     int action = (int)env->actions[0];
     int ok = cr_step(&env->state, action, (int8_t)env->current_player);
     if (ok != 1) {
+        // Illegal move: acting player forfeits (-1), opponent gains (+1).
         env->log.illegal_moves += 1.0f;
         env->rewards[0] = -1.0f;
         env->terminals[0] = 1.0f;
-        cr_ocean_add_log(env, env->rewards[0]);
+        cr_ocean_add_log(env, -1.0f);
+        cr_ocean_add_log(env, 1.0f);
         cr_ocean_reset_state(env);
         return;
     }
 
     int8_t winner = cr_get_winner(&env->state);
     if (winner != 0) {
-        env->rewards[0] = winner == env->current_player ? 1.0f : -1.0f;
+        // Zero-sum: log both winner (+1) and loser (-1) as separate entries.
+        // In self-play the same policy plays both sides, so the losing player's
+        // final turn (reward 0, game ongoing) is followed by the winner's
+        // terminal move (+1).  Without the loser entry, the losing side never
+        // sees an explicit -1 reward.  Two entries per game means
+        // episode_return mean = 0 and perf = 0.5 for balanced play; track
+        // winrate from player 1's perspective via p1_wins / p1_games.
+        float my_reward = winner == env->current_player ? 1.0f : -1.0f;
+        env->rewards[0] = my_reward;
         env->terminals[0] = 1.0f;
-        cr_ocean_add_log(env, env->rewards[0]);
+        cr_ocean_add_log(env, my_reward);
+        cr_ocean_add_log(env, -my_reward);
+        env->log.p1_games += 1.0f;
+        if (winner == 1) env->log.p1_wins += 1.0f;
         cr_ocean_reset_state(env);
         return;
     }

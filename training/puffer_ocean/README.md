@@ -33,6 +33,20 @@ There are no runtime conditionals; this fork is single-purpose for Chain Reactio
 The Torch reference model at `training/torch_ppo/model.py` and fixtures remain as
 readable reference until the native trainer is verified against them.
 
+## Self-play reward convention
+
+The Ocean env logs two terminal entries per completed game — winner (+1) and
+loser (-1) — so that both sides receive explicit zero-sum rewards. Without the
+loser entry, the losing player's final move has reward 0 (game ongoing), and
+the value function must infer the loss entirely through bootstrap. The double
+entry means `episode_return` mean = 0 and `perf` = 0.5 for balanced play; track
+actual skill via the `winrate` stat (player 1 wins / games from player 1's
+perspective).
+
+The illegal-move penalty (-1 for the fouling player, +1 for the opponent)
+follows the same zero-sum pattern and is guarded against by the CUDA legal
+action mask (`obs >= 0`).  In practice this counter should always read 0.
+
 ## PufferTank + submodule build
 
 ```bash

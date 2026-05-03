@@ -20,4 +20,5 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "episode_length", log->episode_length);
     dict_set(out, "n", log->n);
     dict_set(out, "illegal_moves", log->illegal_moves);
+    dict_set(out, "winrate", log->p1_games > 0.0f ? log->p1_wins / log->p1_games : 0.0f);
 }
