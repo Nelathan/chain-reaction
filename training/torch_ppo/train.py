@@ -35,6 +35,19 @@ class TrainConfig:
     checkpoint_interval: int = 20
     checkpoint_dir: str = "training/checkpoints/torch_ppo"
     log_dir: str = "training/logs/torch_ppo"
+    wandb: int = 0
+    wandb_project: str = "chain-reaction"
+    wandb_group: str = "torch-ppo"
+    wandb_entity: str = ""
+    wandb_name: str = ""
+    wandb_tags: str = ""
+    wandb_mode: str = ""
+    wandb_base_url: str = ""
+    wandb_silent: int = 1
+    log_interval: int = 10
+    compile_model: int = 1
+    compile_mode: str = "default"
+    sync_gpu_step: int = 0
 
 
 def parse_args() -> TrainConfig:
@@ -75,6 +88,78 @@ def evaluate_policy(model: nn.Module, obs: torch.Tensor) -> tuple[torch.Tensor, 
     return actions, logprobs, values
 
 
+def flatten_log(log: dict, prefix: str = "") -> dict[str, float | int | str]:
+    flat: dict[str, float | int | str] = {}
+    for key, value in log.items():
+        name = f"{prefix}/{key}" if prefix else key
+        if isinstance(value, dict):
+            flat.update(flatten_log(value, name))
+        elif isinstance(value, (float, int, str)):
+            flat[name] = value
+    return flat
+
+
+class IntervalAverager:
+    def __init__(self) -> None:
+        self.totals: dict[str, float] = {}
+        self.counts: dict[str, int] = {}
+        self.tensors: dict[str, list[torch.Tensor]] = {}
+
+    def add(self, values: dict[str, float | int | torch.Tensor]) -> None:
+        for key, value in values.items():
+            if isinstance(value, torch.Tensor):
+                self.tensors.setdefault(key, []).append(value.detach())
+            elif isinstance(value, (float, int)):
+                self.totals[key] = self.totals.get(key, 0.0) + float(value)
+                self.counts[key] = self.counts.get(key, 0) + 1
+
+    def pop(self) -> dict[str, float]:
+        averaged = {
+            key: self.totals[key] / max(self.counts.get(key, 0), 1)
+            for key in self.totals
+        }
+        for key, values in self.tensors.items():
+            averaged[key] = float(torch.stack(values).mean().item())
+        self.totals.clear()
+        self.counts.clear()
+        self.tensors.clear()
+        return averaged
+
+
+def init_wandb(config: TrainConfig, run_id: str):
+    if config.wandb == 0:
+        return None
+    if config.wandb_mode:
+        os.environ["WANDB_MODE"] = config.wandb_mode
+    if config.wandb_base_url:
+        os.environ["WANDB_BASE_URL"] = config.wandb_base_url
+    if config.wandb_silent:
+        os.environ["WANDB_SILENT"] = "true"
+    try:
+        import wandb
+    except ImportError as exc:
+        raise RuntimeError("CHAIN_REACTION_WANDB=1 requires wandb in the training environment") from exc
+
+    tags = [tag.strip() for tag in config.wandb_tags.split(",") if tag.strip()]
+    return wandb.init(
+        project=config.wandb_project,
+        entity=config.wandb_entity or None,
+        group=config.wandb_group or None,
+        name=config.wandb_name or run_id,
+        id=run_id,
+        config=asdict(config),
+        tags=tags or None,
+    )
+
+
+def maybe_compile_model(model: nn.Module, config: TrainConfig) -> nn.Module:
+    if config.compile_model == 0:
+        return model
+    if not hasattr(torch, "compile"):
+        raise RuntimeError("CHAIN_REACTION_COMPILE_MODEL=1 requires torch.compile")
+    return torch.compile(model, mode=config.compile_mode)
+
+
 def ppo_update(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -84,10 +169,10 @@ def ppo_update(
     advantages: torch.Tensor,
     returns: torch.Tensor,
     config: TrainConfig,
-) -> dict[str, float]:
+) -> dict[str, torch.Tensor]:
     batch_size = observations.shape[0]
     indices = torch.arange(batch_size, device=observations.device)
-    losses = {"policy": 0.0, "value": 0.0, "entropy": 0.0, "approx_kl": 0.0}
+    loss_tensors = {"policy": [], "value": [], "entropy": [], "approx_kl": []}
     steps = 0
 
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -116,13 +201,18 @@ def ppo_update(
 
             with torch.no_grad():
                 approx_kl = ((ratio - 1.0) - logratio).mean()
-            losses["policy"] += float(policy_loss.detach())
-            losses["value"] += float(value_loss.detach())
-            losses["entropy"] += float(entropy.detach())
-            losses["approx_kl"] += float(approx_kl.detach())
+            loss_tensors["policy"].append(policy_loss.detach())
+            loss_tensors["value"].append(value_loss.detach())
+            loss_tensors["entropy"].append(entropy.detach())
+            loss_tensors["approx_kl"].append(approx_kl.detach())
             steps += 1
 
-    return {key: value / max(steps, 1) for key, value in losses.items()}
+    if steps == 0:
+        return {key: torch.zeros((), device=observations.device) for key in loss_tensors}
+    return {
+        key: torch.stack(values).mean()
+        for key, values in loss_tensors.items()
+    }
 
 
 def main() -> None:
@@ -131,29 +221,35 @@ def main() -> None:
     os.makedirs(config.checkpoint_dir, exist_ok=True)
     os.makedirs(config.log_dir, exist_ok=True)
 
-    vec = PufferVec(load_puffer_args(config))
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
+    vec = PufferVec(load_puffer_args(config), sync_gpu_step=bool(config.sync_gpu_step))
     device = vec.device
-    model = ChainReactionNet().to(device)
+    checkpoint_model = ChainReactionNet().to(device)
+    model = maybe_compile_model(checkpoint_model, config)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
 
     run_id = str(int(1000 * time.time()))
+    wandb_run = init_wandb(config, run_id)
     logs: list[dict[str, float | int | str | dict]] = []
     global_step = 0
     update = 0
     start_time = time.time()
+    interval = IntervalAverager()
+
+    obs_buf = torch.zeros(config.horizon, vec.total_agents, vec.obs_size, device=device)
+    action_buf = torch.zeros(config.horizon, vec.total_agents, dtype=torch.long, device=device)
+    logprob_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
+    value_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
+    reward_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
+    terminal_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
 
     try:
         while global_step < config.total_timesteps:
-            obs_buf = torch.zeros(config.horizon, vec.total_agents, vec.obs_size, device=device)
-            action_buf = torch.zeros(config.horizon, vec.total_agents, dtype=torch.long, device=device)
-            logprob_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
-            value_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
-            reward_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
-            terminal_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
-
-            illegal_selected = 0
+            illegal_selected = torch.zeros((), dtype=torch.float32, device=device)
             for t in range(config.horizon):
-                obs = torch.as_tensor(vec.observations, device=device).float()
+                obs = vec.observations.float()
                 with torch.no_grad():
                     actions, logprobs, values = evaluate_policy(model, obs)
                 obs_buf[t] = obs
@@ -161,13 +257,13 @@ def main() -> None:
                 logprob_buf[t] = logprobs
                 value_buf[t] = values
 
-                illegal_selected += int((obs.gather(1, actions.view(-1, 1)).squeeze(1) < 0).sum().item())
+                illegal_selected += (obs.gather(1, actions.view(-1, 1)).squeeze(1) < 0).sum()
                 vec.step(actions)
-                reward_buf[t] = torch.as_tensor(vec.rewards, device=device).float()
-                terminal_buf[t] = torch.as_tensor(vec.terminals, device=device).float()
+                reward_buf[t] = vec.rewards.float()
+                terminal_buf[t] = vec.terminals.float()
 
             with torch.no_grad():
-                _, last_values = model(torch.as_tensor(vec.observations, device=device).float())
+                _, last_values = model(vec.observations.float())
                 advantages, returns = compute_negamax_gae(
                     reward_buf, value_buf, terminal_buf, last_values,
                     config.gamma, config.gae_lambda,
@@ -186,27 +282,48 @@ def main() -> None:
             update += 1
             global_step += config.horizon * vec.total_agents
             elapsed = time.time() - start_time
-            env_logs = vec.log()
+            interval.add({
+                "SPS": global_step / max(elapsed, 1e-6),
+                "illegal_action_rate": illegal_selected / (config.horizon * vec.total_agents),
+                "loss/policy": loss_logs["policy"],
+                "loss/value": loss_logs["value"],
+                "loss/entropy": loss_logs["entropy"],
+                "loss/approx_kl": loss_logs["approx_kl"],
+            })
+
             log = {
                 "run_id": run_id,
                 "update": update,
                 "agent_steps": global_step,
                 "uptime": elapsed,
                 "SPS": global_step / max(elapsed, 1e-6),
-                "illegal_action_rate": illegal_selected / (config.horizon * vec.total_agents),
-                "loss": loss_logs,
-                "env": env_logs,
             }
+
+            should_log = update % config.log_interval == 0 or global_step >= config.total_timesteps
+            if should_log:
+                env_logs = vec.log()
+                averaged = interval.pop()
+                averaged.update(flatten_log({"env": env_logs}))
+                averaged["update"] = update
+                averaged["agent_steps"] = global_step
+                averaged["uptime"] = elapsed
+                averaged["SPS"] = global_step / max(elapsed, 1e-6)
+                log["env"] = env_logs
+                log["interval"] = averaged
+
             logs.append(log)
-            print(json.dumps(log, sort_keys=True), flush=True)
+            if wandb_run is not None and should_log:
+                wandb_run.log(averaged, step=global_step)
 
             if update % config.checkpoint_interval == 0 or global_step >= config.total_timesteps:
                 path = os.path.join(config.checkpoint_dir, f"{run_id}_{global_step:016d}.pt")
-                torch.save({"model": model.state_dict(), "config": asdict(config), "step": global_step}, path)
+                torch.save({"model": checkpoint_model.state_dict(), "config": asdict(config), "step": global_step}, path)
 
         with open(os.path.join(config.log_dir, run_id + ".json"), "w") as f:
             json.dump({"config": asdict(config), "logs": logs}, f)
     finally:
+        if wandb_run is not None:
+            wandb_run.finish()
         vec.close()
 
 

@@ -14,6 +14,27 @@ podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer \
 
 The script builds the Ocean environment, then runs `training/torch_ppo/train.py` instead of PufferLib's native CUDA trainer.
 
+To log the repo-owned trainer to Weights & Biases, export `WANDB_API_KEY` on the host and enable the trainer flag through Compose:
+
+```bash
+export WANDB_API_KEY=...
+
+CHAIN_REACTION_WANDB=1 \
+CHAIN_REACTION_WANDB_PROJECT=chain-reaction \
+CHAIN_REACTION_WANDB_GROUP=torch-ppo \
+podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer \
+  bash /workspace/chain-reaction/training/torch_ppo/train.sh
+```
+
+Optional pass-throughs are `CHAIN_REACTION_WANDB_ENTITY`, `CHAIN_REACTION_WANDB_NAME`, `CHAIN_REACTION_WANDB_TAGS`, `CHAIN_REACTION_WANDB_MODE`, and `CHAIN_REACTION_WANDB_BASE_URL`. W&B is disabled by default so smoke tests and offline runs do not require credentials. The trainer does not print per-update JSON; interval metrics are averaged and sent to W&B when enabled, while the full JSON log is still written at the end of the run.
+
+Useful performance knobs:
+
+- `CHAIN_REACTION_LOG_INTERVAL=10` logs every N PPO updates and averages interval metrics.
+- `CHAIN_REACTION_COMPILE_MODEL=1` enables `torch.compile` for the policy/value model.
+- `CHAIN_REACTION_COMPILE_MODE=default` forwards the compile mode to PyTorch.
+- `CHAIN_REACTION_SYNC_GPU_STEP=0` keeps Puffer GPU stepping asynchronous; set to `1` only when debugging native step ordering.
+
 ## Training contract
 
 - Observations are current-player-relative signed distance-to-explosion boards shaped as `(batch, 1, 8, 8)`.

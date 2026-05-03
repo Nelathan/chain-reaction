@@ -41,11 +41,12 @@ def _cpu_tensor(ptr: int, shape: tuple[int, ...], dtype: torch.dtype) -> torch.T
 
 
 class PufferVec:
-    def __init__(self, args: dict):
+    def __init__(self, args: dict, sync_gpu_step: bool = False):
         from pufferlib import _C
 
         self._C = _C
         self.gpu = bool(_C.gpu)
+        self.sync_gpu_step = sync_gpu_step
         self.device = torch.device("cuda" if self.gpu else "cpu")
         args["vec"]["num_buffers"] = 1
         self.vec = _C.create_vec(args, _C.gpu)
@@ -71,15 +72,18 @@ class PufferVec:
             self.rewards = _cpu_tensor(self.vec.rewards_ptr, (self.total_agents,), torch.float32)
             self.terminals = _cpu_tensor(self.vec.terminals_ptr, (self.total_agents,), torch.float32)
 
+        self._actions = torch.empty(self.total_agents, 1, dtype=torch.float32, device=self.device)
+
         self.vec.reset()
 
     def step(self, actions: torch.Tensor) -> None:
-        flat = actions.view(-1, 1).to(dtype=torch.float32, device=self.device).contiguous()
+        self._actions[:, 0].copy_(actions.to(device=self.device, non_blocking=True))
         if self.gpu:
-            self.vec.gpu_step(flat.data_ptr())
-            torch.cuda.synchronize()
+            self.vec.gpu_step(self._actions.data_ptr())
+            if self.sync_gpu_step:
+                torch.cuda.synchronize()
         else:
-            self.vec.cpu_step(flat.data_ptr())
+            self.vec.cpu_step(self._actions.data_ptr())
 
     def log(self) -> dict:
         return self.vec.log()
