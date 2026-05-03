@@ -1,3 +1,3 @@
 [submodule "vendor/PufferLib"]
 	path = vendor/PufferLib
-	url = git@github.com:PufferAI/PufferLib.git
+	url = git@github.com:Nelathan/chain-reaction-pufferlib.git

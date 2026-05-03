@@ -49,6 +49,9 @@ action mask (`obs >= 0`).  In practice this counter should always read 0.
 
 ## PufferTank + submodule build
 
+The PufferLib submodule (`vendor/PufferLib`, branch `chain-reaction-native`) points
+at a public fork: `git@github.com:Nelathan/chain-reaction-pufferlib.git`.
+
 ```bash
 # From repo root:
 git submodule init

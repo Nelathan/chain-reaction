@@ -56,6 +56,7 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Implement illegal-action masking before softmax.
 - [x] Implement negamax/sign-aware GAE for alternating current-player-perspective turns.
 - [x] Fork PufferLib v4 as a repo submodule (`vendor/PufferLib`, branch `chain-reaction-native`).
+- [x] Publish fork to GitHub: `github.com/Nelathan/chain-reaction-pufferlib`, update `.gitmodules` and submodule remotes.
 - [x] Hardcode Chain Reaction legal action mask (`obs >= 0`) in native CUDA `sample_logits`, `ppo_discrete_head`, and policy-gradient kernels.
 - [x] Hardcode negamax alternating-turn GAE (`r - gamma*V(next)`, `-gamma*lambda*next_adv`) in native CUDA advantage kernels.
 - [x] Verify legal mask at env level: `--log.illegal_moves` counter confirmed 0.000 in PufferTank training runs.
