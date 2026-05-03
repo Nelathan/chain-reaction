@@ -19,6 +19,23 @@ The preferred first real training target is the CUDA workstation using PufferTan
 
 Do not regress to PyPI `pufferlib==3.0.0` for convenience. That package exposes a different integration API and would rot the v4 contract.
 
+## Local Cython bridge smoke
+
+The repo-local Cython bridge is a CPU verification path for `core/chain_reaction.hpp`. It does not require CUDA, PufferTank, or a PufferLib checkout. On Fedora, install the C++ compiler driver once:
+
+```bash
+sudo dnf install -y gcc-c++
+```
+
+Then build and test through `uv` from the `training/` directory. `training/setup.py` currently expects that working directory because its extension source is declared as `chain_reaction.pyx`.
+
+```bash
+uv run --group dev python setup.py build_ext --inplace
+uv run --group dev python test_bridge.py
+```
+
+If `uv run --group dev python training/setup.py build_ext --inplace` is run from the repository root, Cython will fail with `chain_reaction.pyx doesn't match any files`. That is a cwd issue, not a core or compiler failure.
+
 ## Fedora CUDA workstation path
 
 The official Puffer docs point at PufferTank Docker. The important contract is in PufferTank's `docker.sh`, not in cloning that repo into this project:

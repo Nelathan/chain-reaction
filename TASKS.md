@@ -59,7 +59,7 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [ ] Implement single-policy self-play.
 - [ ] Implement history-pool opponent sampling.
 - [ ] Train a tiny CNN baseline beyond smoke-test scale.
-- [ ] Save model checkpoints.
+- [x] Save model checkpoints.
 - [ ] Add rollout metrics for win rate, episode length, illegal-action rate, cascade depth, and truncation count.
 - [ ] Add a CLI/TUI replay viewer for policy/debug inspection before Godot integration.
 - [ ] Export an inference artifact usable by Godot.

@@ -14,8 +14,11 @@ def compute_negamax_gae(
     """Compute GAE for alternating current-player-perspective turns.
 
     `values[t]` estimates the position for the player to move at timestep t.
-    On a nonterminal transition, timestep t+1 is from the opponent's
-    perspective, so its value and advantage enter with a negamax sign flip.
+    Rewards are also from the actor's timestep-t perspective. On a nonterminal
+    transition, timestep t+1 is from the opponent's perspective, so the return
+    recurrence is `G_t = r_t - gamma * G_{t+1}` rather than the usual
+    single-agent `r_t + gamma * G_{t+1}`. The next value and next advantage
+    therefore enter with a negamax sign flip.
     """
     if rewards.shape != values.shape or rewards.shape != terminals.shape:
         raise ValueError("rewards, values, and terminals must have matching [T, B] shapes")
