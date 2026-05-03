@@ -125,9 +125,9 @@ export class ChainReaction {
       if (owner === 0) {
         out[i] = 0;
       } else if (owner === playerId) {
-        out[i] = this.tokens[i] - this.getMass(i);
+        out[i] = this.getMass(i) - this.tokens[i];
       } else {
-        out[i] = (this.tokens[i] - this.getMass(i)) * -1;
+        out[i] = (this.getMass(i) - this.tokens[i]) * -1;
       }
     }
   }

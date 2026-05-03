@@ -16,11 +16,21 @@ def main():
     assert env.wave_log_truncated == 0
     assert env.get_winner() == 0
     assert env.legal_actions(2)[0] == 0
-    assert env.observation(1)[0] == -1
-    assert env.observation(2)[0] == 1
+    assert env.observation(1)[0] == 1
+    assert env.observation(2)[0] == -1
     assert env.step(0, 2) == 0
     assert env.tokens[0] == 1
     assert env.owners[0] == 1
+
+    env.reset()
+    assert env.step(1, 1) == 1
+    assert env.observation(1)[1] == 2
+    assert env.observation(2)[1] == -2
+
+    env.reset()
+    assert env.step(9, 1) == 1
+    assert env.observation(1)[9] == 3
+    assert env.observation(2)[9] == -3
 
     assert env.step_fast(1, 2) == 1
     assert env.tokens[1] == 1

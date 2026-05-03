@@ -235,9 +235,9 @@ inline void cr_write_observation(const GameState* state, int8_t player_id, int8_
         if (owner == 0) {
             out_observation[i] = 0;
         } else if (owner == player_id) {
-            out_observation[i] = (int8_t)(state->tokens[i] - cr_get_mass(i));
+            out_observation[i] = (int8_t)(cr_get_mass(i) - state->tokens[i]);
         } else {
-            out_observation[i] = (int8_t)((state->tokens[i] - cr_get_mass(i)) * -1);
+            out_observation[i] = (int8_t)((cr_get_mass(i) - state->tokens[i]) * -1);
         }
     }
 }

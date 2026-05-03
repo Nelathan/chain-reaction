@@ -50,8 +50,11 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Add PufferTank 4.0 Compose wiring for the Fedora CUDA workstation.
 - [x] Build the PufferLib v4 Ocean environment on the CUDA workstation through PufferTank.
 - [x] Run one tiny end-to-end PufferLib training job from reset to saved checkpoint.
-- [ ] Define the single-channel signed-distance-to-explosion observation tensor.
-- [ ] Implement illegal-action masking before softmax.
+- [x] Verify and pin the single-channel signed-distance-to-explosion observation tensor with corner, edge, center, empty, own, and opponent fixtures.
+- [x] Add a repo-owned Torch PPO entrypoint that uses PufferLib Ocean only as the vectorized environment engine.
+- [x] Implement the 32-channel residual CNN policy/value model.
+- [x] Implement illegal-action masking before softmax.
+- [x] Implement negamax/sign-aware GAE for alternating current-player-perspective turns.
 - [ ] Load a saved checkpoint and run an evaluation rollout.
 - [ ] Implement single-policy self-play.
 - [ ] Implement history-pool opponent sampling.

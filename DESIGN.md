@@ -16,7 +16,7 @@ The architecture exists to keep gameplay semantics in exactly one place while al
 
 - **Logic Definition:** TypeScript. Strictly typed, easy to debug, and useful as high-quality prompt context for AI translation.
 - **Engine:** C++. A single header, STB-style, zero dependencies, no heap allocation in the core game loop.
-- **Dojo:** Python / PufferLib through Cython bindings.
+- **Dojo:** Python / PyTorch PPO using PufferLib Ocean as the vectorized environment engine.
 - **Glass:** Godot 4.x through GDExtension.
 
 ## Shared Core Philosophy
@@ -24,7 +24,7 @@ The architecture exists to keep gameplay semantics in exactly one place while al
 The C++ header is the source of runtime truth. Godot and PufferLib are consumers, not owners, of game logic.
 
 - Godot must remain a dumb terminal: read state, render sprites, pass user actions, display outcomes.
-- PufferLib must remain a throughput harness: create many environments, step them, collect observations and rewards.
+- PufferLib must remain a throughput harness: create many environments, step them, collect observations and rewards. The learning code may be repo-owned PyTorch so the model, masking, and PPO semantics stay inspectable.
 - Neither consumer may reimplement explosion, ownership, legality, terminal-state, reward, or winner logic.
 
 If behavior differs between consumers, the C++ header is wrong, the binding is wrong, or the test is wrong. There is no fourth option where duplicated logic gets to live because it is convenient.
@@ -109,43 +109,48 @@ The core can record a fixed-size cascade flight recorder for the most recent mov
 
 The simulation schema is the source of truth: separate flat arrays for token counts and owner IDs. It can represent transient overfull cells during cascade resolution, such as a center with five tokens before the next wave consumes its critical mass.
 
-The observation schema is derived from stable simulation states for training: signed distance to explosion from the acting player's perspective. It is not the storage model and must not replace the simulation arrays. Consumers may read observations, but they must not infer or mutate game rules from them.
+The observation schema is derived from stable simulation states for training: signed distance to explosion from the acting player's perspective. Empty cells are `0`. A current-player-owned cell is positive: `critical_mass - tokens`, so `1` means one token from explosion and immediate tactical opportunity. An opponent-owned cell is the negative of that same distance, so `-1` means one token from explosion and immediate danger. It is not the storage model and must not replace the simulation arrays. Consumers may read observations, but they must not infer or mutate game rules from them.
 
 ## Product Decisions
 
 We are optimizing for a one-day development cycle to reach a playable prototype.
 
 - **Visuals:** Godot renders the state array. No shader cleverness until the AI can beat a human.
-- **Training:** single policy, self-play, history pool. No model merging. Train one tiny CNN continuously against older snapshots of itself.
-- **Observation:** one spatial channel is enough for the first cut: signed distance to explosion, `(current_tokens - max_capacity) * owner_sign`. The network gets the physics directly instead of wasting capacity memorizing corner and edge geometry.
+- **Training:** repo-owned PyTorch PPO, single policy, self-play, history pool. No model merging. Train one tiny CNN continuously against older snapshots of itself while PufferLib supplies fast vectorized environment stepping.
+- **Observation:** one spatial channel is enough for the first cut: signed distance to explosion, `(critical_mass - current_tokens) * owner_sign`, with `owner_sign` measured from the acting player's perspective. The network gets the physics directly instead of wasting capacity memorizing corner and edge geometry.
 - **Fun Factor:** Godot inference uses temperature scaling. Same weights, higher entropy. The goal is adjustable personality: from Terminator to distracted sibling.
 
 ## Reinforcement Learning Strategy
 
 Training starts from scratch. No human data, supervised fine-tuning, GANs, or theatrical model stew.
 
-- **Algorithm:** PPO through self-play.
+- **Algorithm:** PPO through self-play. Use PufferLib Ocean for vectorized stepping, but keep the trainer and neural network in this repository unless a later speed bottleneck proves native Puffer CUDA model work is worth the opacity.
 - **League:** one current policy trains against a history pool of older checkpoints. We do not merge models; we sample past selves to prevent catastrophic forgetting.
 - **Action masking:** illegal moves are masked before softmax by setting their logits or log probabilities to negative infinity. Compute goes toward strategy, not relearning legality.
+- **Value semantics:** observations are always from the player-to-move perspective, so `V(s)` means value for the current player. Because turns alternate, the next nonterminal value is the opponent's value from the current player's perspective and must be negated in GAE/bootstrapping. Standard single-agent PPO bootstrapping without this negamax sign flip teaches the critic that the opponent's good future is also good for us.
 - **History:** none. The game is Markovian; the current board contains the required state.
 - **Episode cap:** training may use a high maximum step count to keep batches finite. Hitting that cap is a harness truncation signal, not a core draw condition.
-- **PufferLib v4 integration:** training uses PufferLib's Ocean native environment contract, not the legacy Python `PufferEnv` wrapper. The Chain Reaction Ocean scaffold includes the shared C++ core and can be built through a PufferLib 4.0 source checkout with `build.sh chain_reaction --cpu` on macOS or the CUDA backend on the workstation.
+- **PufferLib v4 integration:** environment stepping uses PufferLib's Ocean native environment contract, not the legacy Python `PufferEnv` wrapper. The Chain Reaction Ocean scaffold includes the shared C++ core and can be built through a PufferLib 4.0 source checkout with `build.sh chain_reaction --cpu` on macOS or the CUDA backend on the workstation. The default native Puffer trainer is useful as a throughput smoke test, not as the long-term model-design surface.
 - **Development target:** first meaningful training belongs on the CUDA workstation or PufferTank Docker, not the M1 laptop. The laptop is for rule verification, Cython smoke tests, and occasional CPU build probes. Do not tune the neural net around macOS CPU constraints.
 - **Next product loop:** prove one minimal end-to-end training run before polishing presentation. After the first checkpoint can be trained, saved, and loaded, build a cheap CLI/TUI replay/debug viewer before Godot so policy behavior, legal masks, rewards, terminal states, and cascade depths are inspectable without renderer ceremony.
 
 ## Neural Network Shape
 
-The first model should be microscopic and spatially honest.
+The first model should be microscopic and spatially honest. The point is not to optimize a generic baseline; it is to make the model match the board and remain readable enough to learn from.
 
-The first training run should use this boring baseline unchanged unless it cannot execute. Its job is to prove the full data path, not to be strong. Tune architecture only after rollout collection, legal masking, rewards, checkpointing, and policy inspection are visibly working.
+The first repo-owned training run should use this baseline unchanged unless it cannot execute. Its job is to prove the full data path, not to be strong. Tune architecture only after rollout collection, legal masking, sign-aware value targets, rewards, checkpointing, and policy inspection are visibly working.
 
 - **Input:** `(Batch, 1, 8, 8)` signed-distance-to-explosion channel.
-- **Backbone:** `Conv2d(1, 32, kernel=3)` -> `ReLU` -> `Conv2d(32, 64, kernel=3)` -> `ReLU`.
-- **Mixer:** flatten into `Linear(128)` for global board synthesis.
-- **Actor head:** `Linear(64)` for the 64 board actions.
-- **Critic head:** `Linear(1)` for value in `[-1.0, 1.0]`.
+- **Stem:** `Conv2d(1, 32, kernel=3, padding=1)`.
+- **Trunk:** four pre-activation residual blocks at constant 32 channels: `GroupNorm(8, 32)` -> `SiLU` -> `Conv2d(32, 32, 3, padding=1)` -> `GroupNorm(8, 32)` -> `SiLU` -> `Conv2d(32, 32, 3, padding=1)` -> add to the stream. No stride, pooling, or dimensionality reduction in the trunk; the board stays an 8x8 board.
+- **Policy head:** `GroupNorm` -> `SiLU` -> `Conv2d(32, 1, kernel=1)` -> flatten the final 8x8 map into 64 action logits. Legal masking happens on logits before the categorical distribution is built, never by zeroing probabilities after softmax.
+- **Critic head:** `GroupNorm` -> `SiLU` -> `Conv2d(32, C_v, kernel=1)` with small `C_v` such as 4 or 8 -> global average pool -> one small MLP -> scalar value. Do not apply `tanh` in the baseline; terminal rewards are bounded, but value targets and bootstrapping should not be saturated by architecture.
 
-We reject 1D convolutions because they destroy spatial adjacency. We reject Transformers for the first cut because `O(N^2)` attention on an 8x8 deterministic board is a velvet hammer for a thumbtack.
+The policy avoids flattening the trunk into an MLP because actions are cells. A per-cell `1x1` projection keeps the action semantics aligned with board locations. The value head may aggregate globally because it predicts the whole position, not a move at one square.
+
+Square 3x3 convolutions mix diagonal cells even though Chain Reaction pressure is orthogonal. That is acceptable for the first baseline because the kernel is standard, cheap, and can learn to ignore diagonal correlations. A cross-shaped convolution or attention-based cell mixer is an ablation after the baseline works, not the starting tax.
+
+We reject 1D convolutions because they destroy spatial adjacency. We defer Transformers and attention residual mixers for the first cut because a tiny CNN should already cover the 8x8 board and teach the full RL loop with less ceremony.
 
 ## Godot UX
 
