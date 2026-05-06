@@ -186,7 +186,9 @@ inline void cr_update_alive_mask(GameState* state) {
     state->players_alive_mask = alive;
 }
 
-inline int cr_step_internal(GameState* state, WaveLog* log, int action_idx, int8_t player_id) {
+inline int cr_step_internal(GameState* state, WaveLog* log, int16_t* out_wave_count, int8_t* out_wave_log_truncated, int action_idx, int8_t player_id) {
+    if (out_wave_count != 0) *out_wave_count = 0;
+    if (out_wave_log_truncated != 0) *out_wave_log_truncated = 0;
     if (!cr_is_legal_move(state, action_idx, player_id)) return 0;
 
     state->tokens[action_idx]++;
@@ -199,23 +201,33 @@ inline int cr_step_internal(GameState* state, WaveLog* log, int action_idx, int8
     int8_t next_owners[CR_CELLS];
     int8_t pressure[CR_PLAYERS * CR_CELLS];
     int8_t exploded_cells[CR_CELLS];
+    int16_t wave_count = 0;
 
     while (cr_resolve_wave(state, log, next_tokens, next_owners, pressure, exploded_cells)) {
+        wave_count++;
         state->last_move_exploded = 1;
         cr_update_alive_mask(state);
         if (cr_count_bits(state->players_alive_mask) == 1) break;
     }
 
     if (state->last_move_exploded != 0) cr_update_alive_mask(state);
+    if (out_wave_count != 0) *out_wave_count = wave_count;
+    if (out_wave_log_truncated != 0) {
+        *out_wave_log_truncated = log != 0 ? log->wave_log_truncated : 0;
+    }
     return 1;
 }
 
 inline int cr_step(GameState* state, int action_idx, int8_t player_id) {
-    return cr_step_internal(state, 0, action_idx, player_id);
+    return cr_step_internal(state, 0, 0, 0, action_idx, player_id);
 }
 
 inline int cr_step_with_log(GameState* state, WaveLog* log, int action_idx, int8_t player_id) {
-    return cr_step_internal(state, log, action_idx, player_id);
+    return cr_step_internal(state, log, 0, 0, action_idx, player_id);
+}
+
+inline int cr_step_with_stats(GameState* state, int action_idx, int8_t player_id, int16_t* out_wave_count, int8_t* out_wave_log_truncated) {
+    return cr_step_internal(state, 0, out_wave_count, out_wave_log_truncated, action_idx, player_id);
 }
 
 inline int8_t cr_get_winner(const GameState* state) {

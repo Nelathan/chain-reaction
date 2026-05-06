@@ -66,6 +66,13 @@ docker compose -f compose.yaml -f compose.docker.yaml run --rm puffer
 
 # Build-only smoke (skips training):
 BUILD_ONLY=1 podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer
+
+# Finite checkpoint evaluation against random legal play:
+podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer \
+  bash /workspace/chain-reaction/training/puffer_ocean/puffertank_eval.sh \
+    --checkpoint /workspace/chain-reaction/training/checkpoints/chain_reaction/1778090124759/0000000000262144.bin \
+    --games 1000 \
+    --max-turns 512
 ```
 
 The compose mounts the repo at `/workspace/chain-reaction` inside the container,
@@ -73,6 +80,12 @@ uses the submodule as `PUFFER_ROOT`, and runs `puffertank_train.sh` which builds
 the environment and launches training via `python -m pufferlib.pufferl`.
 
 Do not regress to PyPI `pufferlib==3.0.0` for convenience. That package exposes a different integration API and would rot the v4 contract.
+
+Do not use `python -m pufferlib.pufferl eval chain_reaction --render-mode None` for checkpoint strength evaluation. The stock PufferLib eval function loops forever (`render`, then `rollouts`) even when rendering is disabled; use the finite evaluator script above so the run ends with JSON metrics instead of becoming a CPU space heater.
+
+Latest cap-aligned result: a `max_turns=128`, horizon `128`, 1,048,576-step native smoke produced checkpoint `training/checkpoints/chain_reaction/1778096039119/0000000001572864.bin`; matched `128`-cap evaluation scored `0.579` combined winrate over `1000` deterministic games vs random legal play (`P1=0.564`, `P2=0.594`, illegal moves `0`, truncations `15`, mean episode length `120.303`). The JSON report is `training/evals/chain_reaction/cap128_1778096039119_1572864.json`.
+
+Caveat: the earlier `0.584` result for checkpoint `1778090124759/0000000000262144.bin` was evaluated at `max_turns=512` after training at `max_turns=64`. Matched `64`-cap evaluation gives `1000/1000` truncations, so that checkpoint is not clean strength evidence.
 
 ## Local Cython bridge smoke
 

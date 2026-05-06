@@ -26,7 +26,40 @@ Only the C++ core owns runtime game behavior. Bindings expose it. Renderers disp
 - Keep the C++ header zero-dependency beyond fixed-width C/C++ primitive headers.
 - Do not touch Godot or Python bindings until the C++ core is mathematically verified against the TypeScript prototype.
 - Use `uv` for Python dependency management, environments, builds, and test execution. Do not use ambient `python`, `pip`, or global site packages for repo work unless the user explicitly authorizes an exception.
+- Do not try to build or verify the native PufferLib CUDA trainer on the host. Use the PufferTank Compose path; the image is the toolchain contract.
 - Do not optimize visuals before the AI/training loop exists.
+
+## Native PufferLib Verification Protocol
+
+The PufferLib fork lives at `vendor/PufferLib` on branch `chain-reaction-native`. It is intentionally single-purpose: Chain Reaction legal masking and negamax GAE are hardcoded in `src/pufferlib.cu` with no runtime flags.
+
+When reviewing or changing the submodule:
+
+1. Inspect the submodule diff directly in `vendor/PufferLib`.
+2. Rebuild inside PufferTank, not on the host:
+
+```bash
+BUILD_ONLY=1 podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer
+```
+
+3. Run a tiny finite smoke after the build succeeds:
+
+```bash
+CHAIN_REACTION_TRAIN_TIMEOUT=3m \
+CHAIN_REACTION_TOTAL_TIMESTEPS=8192 \
+CHAIN_REACTION_CHECKPOINT_INTERVAL=1 \
+CHAIN_REACTION_TOTAL_AGENTS=256 \
+CHAIN_REACTION_MINIBATCH_SIZE=2048 \
+CHAIN_REACTION_HORIZON=32 \
+CHAIN_REACTION_MAX_TURNS=512 \
+podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer
+```
+
+4. Treat successful build plus tiny smoke as a smoke check only. It proves the image consumes the changed submodule and the loop breathes; it does not prove policy quality or kernel algebra.
+
+The container build script creates untracked symlinks inside the submodule (`chain_reaction_core`, `config/chain_reaction.ini`, `ocean/chain_reaction`). Do not mistake them for source changes.
+
+Known sharp edge: PufferLib has scalar and vector advantage kernels selected by horizon alignment. Any GAE change must keep both paths algebraically identical; otherwise `CHAIN_REACTION_HORIZON` silently changes learning math.
 
 ## Verification Order
 

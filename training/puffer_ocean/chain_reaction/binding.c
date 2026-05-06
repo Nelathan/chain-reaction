@@ -20,5 +20,15 @@ void my_log(Log* log, Dict* out) {
     dict_set(out, "episode_length", log->episode_length);
     dict_set(out, "n", log->n);
     dict_set(out, "illegal_moves", log->illegal_moves);
+    dict_set(out, "truncations", log->truncations);
+    dict_set(out, "truncation_rate", log->truncations);
+    dict_set(out, "terminal_games", log->terminal_games);
+    dict_set(out, "terminal_rate", log->terminal_games);
+    dict_set(out, "mean_terminal_actor_reward", log->terminal_games > 0.0f ? log->terminal_rewards / log->terminal_games : 0.0f);
+    dict_set(out, "cascade_depth", log->n > 0.0f ? log->cascade_depth / log->n : 0.0f);
+    dict_set(out, "mean_cascade_depth", log->cascade_events > 0.0f ? log->cascade_depth / log->cascade_events : 0.0f);
+    dict_set(out, "max_cascade_depth", log->max_cascade_depth);
+    dict_set(out, "cascade_log_truncations", log->cascade_log_truncations);
     dict_set(out, "winrate", log->p1_games > 0.0f ? log->p1_wins / log->p1_games : 0.0f);
+    dict_set(out, "terminal_winrate", log->terminal_games > 0.0f ? log->p1_wins / log->terminal_games : 0.0f);
 }
