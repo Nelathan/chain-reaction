@@ -1,5 +1,7 @@
 # Goal: First Learned Chain Reaction Model On 4x4
 
+Status: achieved on 2026-05-07 with the repo-owned Torch PPO path. The trajectory below remains useful as the record of why 4x4 was chosen and what the gate required; current status and next-session instructions live in `NEXT_SESSION_HANDOFF.md`, while the board-size curriculum doctrine lives in `DESIGN.md`.
+
 Train the repo-owned Torch PPO implementation to a first credible learned model on a 4x4 Chain Reaction board: at least 90% win rate against random legal play over 1000 evaluation games, with zero illegal selected actions, low truncation, sane loss/entropy behavior, and reproducible checkpoint loading/evaluation.
 
 This is the primary learning path. Native PufferLib model work is paused as an architecture-iteration route. PufferLib remains the environment engine and later acceleration target, not the place to evolve the Chain Reaction network.
@@ -116,6 +118,24 @@ Future 8x8 migration gate:
 ## Definition Of First Learned Model
 
 A checkpoint qualifies as the first learned 4x4 model only if all gates pass.
+
+Passed checkpoint:
+
+```text
+checkpoint: training/checkpoints/torch_ppo/1778140129666_0000000010027008.pt
+checkpoint step/impressions: 10027008
+board size: 4x4
+max_turns: 32
+eval games: 1000
+combined winrate: 0.998
+P1 winrate: 0.996
+P2 winrate: 1.000
+Wilson lower bound: 0.9927
+illegal selected actions: 0
+truncations: 0
+terminal rate: 1.0
+mean episode length: 20.432
+```
 
 Primary evaluation gate:
 
@@ -345,6 +365,17 @@ Expected result:
 - 90%+ combined win rate against random legal play over 1000 games, satisfying side-specific and truncation gates.
 
 At each stage, evaluate saved checkpoints, not live training state.
+
+Actual completed progression:
+
+```text
+8k smoke: combined winrate 0.531, illegal 0, truncations 0
+262144 pulse: combined winrate 0.621, illegal 0, truncations 0
+1015808 learning attempt: combined winrate 0.834, illegal 0, truncations 0
+10027008 gate: combined winrate 0.998, illegal 0, truncations 0
+```
+
+The 4x4 phase is complete. Do not keep extending this plan as the main status ledger; put architecture doctrine in `DESIGN.md`, chronology in `CHANGELOG.md`, and current continuation state in `NEXT_SESSION_HANDOFF.md`.
 
 ### Phase 6: Evaluation Report
 

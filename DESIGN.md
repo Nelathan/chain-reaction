@@ -137,6 +137,32 @@ Training starts from scratch. No human data, supervised fine-tuning, GANs, or th
 - **Container artifact boundary:** Compose plus bind mounts is the development contract because it guarantees the image builds the current working tree and submodule checkout. A derived Dockerfile from `pufferai/puffertank:4.0` is appropriate for CI or release freezing, but it must not replace the edit/review loop until native semantics are stable; copied source layers are too easy to make stale during CUDA patch review.
 - **Next product loop:** prove one minimal end-to-end training run before polishing presentation. After the first checkpoint can be trained, saved, and loaded, build a cheap CLI/TUI replay/debug viewer before Godot so policy behavior, legal masks, rewards, terminal states, and cascade depths are inspectable without renderer ceremony.
 
+## Board-Size Curriculum
+
+The repo-owned Torch CNN treats board size as a run parameter, not as model identity. The trunk is fully convolutional, the policy head emits one logit per cell through a `1x1` projection, and the value head uses global pooling. Those choices are no longer just aesthetic: a 4x4-trained checkpoint transferred cold to 8x8 and beat random legal play by a wide margin.
+
+Checkpoint metadata must still record the source board size for provenance, reproducibility, and accidental-mismatch detection. But planned evaluation and fine-tuning on a different target board size should be a first-class path, not an exceptional hidden bypass. Reports must include both source checkpoint board size and target board size.
+
+Current measured reference:
+
+```text
+source checkpoint: training/checkpoints/torch_ppo/1778140129666_0000000010027008.pt
+source board: 4x4
+target board: 8x8
+eval games: 1000
+combined winrate: 0.890
+P1 winrate: 0.862
+P2 winrate: 0.918
+Wilson lower bound: 0.8691
+illegal selected actions: 0
+truncations: 0
+terminal rate: 1.0
+```
+
+This does not make a 4x4 checkpoint an 8x8-trained agent. It does establish curriculum learning as the next primary route: learn small boards cheaply, transfer compatible spatial weights upward, reset optimizer state, fine-tune, and compare against same-budget target-board training from scratch. The curriculum should be fine-grained across `3x3` through `8x8` so each board-size jump is small enough to measure transfer, cap behavior, and optimization stability instead of hiding failure behind a large geometry shock.
+
+The useful training budget unit is not a naked global transition count. One PPO update consumes `total_agents * horizon` fresh environment impressions before optimization. The successful 4x4 runs used `1024 * 32 = 32768` fresh impressions per update with minibatches of `8192`; the signal question is whether each optimizer step sees enough fresh rollout mass to beat noise.
+
 ## Training Pivot Back To Torch
 
 Native PufferLib model work is paused as the primary route. The attempt to reproduce the design CNN inside PufferLib exposed the wrong coupling: custom architectures currently require editing the PufferLib fork, rebuilding CUDA internals, and debugging model math, precision, PPO semantics, and kernel plumbing at the same time. That loop is too slow and too opaque for the current milestone.
