@@ -60,3 +60,14 @@ The trunk does not stride, pool, or flatten. The board remains an 8x8 board unti
 ## Why not native Puffer CUDA model work first?
 
 PufferLib 4.0's native CUDA trainer is excellent for throughput, but custom model and masked-logit semantics live inside C++/CUDA internals. The goal here is learning RL and designing game-specific networks, not hiding the interesting parts behind a fast black box. If this Torch PPO path becomes too slow after it is correct and inspectable, native CUDA work can be justified with evidence.
+
+## Recovery plan
+
+The current primary path is to return to this trainer and stop iterating Chain Reaction model architecture inside the PufferLib submodule.
+
+1. Use the exact baseline model in `model.py`; do not simplify it to match native Puffer constraints.
+2. Run short PufferTank smokes first: finite losses, zero illegal sampled actions, and metrics written without relying on dashboard impressions.
+3. Train with a game cap that reaches real terminals (`CHAIN_REACTION_MAX_TURNS >= 128` based on native telemetry); do not evaluate strength from all-truncation checkpoints.
+4. Evaluate checkpoint progression against random legal play under the same cap used for training.
+5. Add history-pool self-play only after the single-policy exact CNN shows measurable improvement.
+6. Revisit native CUDA/Triton only with a concrete target: either accelerate a known-good Torch model or add a clean root-owned native model seam. Do not move architecture iteration back into the PufferLib fork by default.

@@ -116,7 +116,7 @@ The observation schema is derived from stable simulation states for training: si
 We are optimizing for a one-day development cycle to reach a playable prototype.
 
 - **Visuals:** Godot renders the state array. No shader cleverness until the AI can beat a human.
-- **Training:** the intended inspectable architecture remains repo-owned PyTorch PPO with a tiny CNN and history-pool self-play. The audited native CUDA path currently does something different: it trains PufferLib's default linear encoder + MinGRU + linear decoder, with no convolutional board trunk and no history pool. Do not claim CNN training from native PufferLib logs unless the runtime model print says so.
+- **Training:** the primary model-iteration path is repo-owned PyTorch PPO with the exact tiny CNN described below and, later, history-pool self-play. Native PufferLib remains a fast environment/native-trainer experiment, not the source of truth for architecture iteration. Do not claim native CNN parity unless the runtime model print and code path match this document.
 - **Observation:** one spatial channel is enough for the first cut: signed distance to explosion, `(critical_mass - current_tokens) * owner_sign`, with `owner_sign` measured from the acting player's perspective. The network gets the physics directly instead of wasting capacity memorizing corner and edge geometry.
 - **Fun Factor:** Godot inference uses temperature scaling. Same weights, higher entropy. The goal is adjustable personality: from Terminator to distracted sibling.
 
@@ -124,24 +124,38 @@ We are optimizing for a one-day development cycle to reach a playable prototype.
 
 Training starts from scratch. No human data, supervised fine-tuning, GANs, or theatrical model stew.
 
-- **Algorithm:** PPO through self-play. Use PufferLib Ocean for vectorized stepping. The repo-owned Torch path is the readable reference for masking, GAE, and CNN architecture; the native CUDA path is faster but currently trains PufferLib's default recurrent MLP-shaped policy, not the repo CNN.
+- **Algorithm:** PPO through self-play. Use PufferLib Ocean for vectorized stepping. The repo-owned Torch path is the readable reference and active development target for masking, negamax GAE, checkpoints, metrics, and the CNN architecture. Native CUDA is demoted to an optimization/research branch until the Torch loop learns with the intended model.
 - **League:** intended: one current policy trains against a history pool of older checkpoints. Current native reality: single-policy self-play only; no checkpoint-history opponent sampling and no frozen opponent weights during rollout.
 - **Action masking:** illegal moves are masked before softmax by setting their logits or log probabilities to negative infinity. Compute goes toward strategy, not relearning legality.
 - **Value semantics:** observations are always from the player-to-move perspective, so `V(s)` means value for the current player. Because turns alternate, the next nonterminal value is the opponent's value from the current player's perspective and must be negated in GAE/bootstrapping. Standard single-agent PPO bootstrapping without this negamax sign flip teaches the critic that the opponent's good future is also good for us.
 - **Self-play reward convention:** completed games are logged as winner (+1) and loser (-1) entries for dashboard accounting. Rollout reward still belongs to the actor of the terminal transition; the previous losing move depends on the alternating-turn negamax return path. This is plausible but should not be called proven until a focused trajectory fixture validates terminal credit assignment from the losing player's perspective.
 - **History:** none. The game is Markovian; the current board contains the required state.
 - **Episode cap:** training may use a high maximum step count to keep batches finite. Hitting that cap is a harness truncation signal, not a core draw condition.
-- **PufferLib v4 integration:** environment stepping uses PufferLib's Ocean native environment contract, not the legacy Python `PufferEnv` wrapper. This repository vendors PufferLib v4 as a git submodule (`vendor/PufferLib`, branch `chain-reaction-native`) with hardcoded CUDA patches for legal action masking and negamax GAE — no runtime source mutation, no boolean feature flags. The Compose setup points the PufferTank container at the submodule as its PUFFER_ROOT, so the container builds from the fork. The repo-owned Torch model at `training/torch_ppo/` remains as the inspectable reference implementation for masking, GAE, and model architecture.
+- **PufferLib v4 integration:** environment stepping uses PufferLib's Ocean native environment contract, not the legacy Python `PufferEnv` wrapper. This repository vendors PufferLib v4 as a git submodule (`vendor/PufferLib`, branch `chain-reaction-native`) with hardcoded CUDA patches for native legal masking and negamax GAE experiments — no runtime source mutation, no boolean feature flags. The Compose setup points the PufferTank container at the submodule as its PUFFER_ROOT, so the container builds from the fork. This is infrastructure, not the model-iteration surface: Chain Reaction architecture work belongs in `training/torch_ppo/` unless we first add a clean root-owned native model extension seam.
 - **Development target:** first meaningful training belongs on the CUDA workstation or PufferTank Docker, not the M1 laptop. The laptop is for rule verification, Cython smoke tests, and occasional CPU build probes. Do not tune the neural net around macOS CPU constraints.
 - **Native trainer verification:** the host is not the source of truth for CUDA viability. Submodule changes must be injected through the PufferTank image by bind-mounting this repo, rebuilding inside the image, and running at least a tiny finite smoke. A build/smoke pass is necessary but not sufficient: native semantic patches still need code review or focused kernel fixtures, especially where PufferLib selects different scalar/vector paths based on horizon alignment.
 - **Container artifact boundary:** Compose plus bind mounts is the development contract because it guarantees the image builds the current working tree and submodule checkout. A derived Dockerfile from `pufferai/puffertank:4.0` is appropriate for CI or release freezing, but it must not replace the edit/review loop until native semantics are stable; copied source layers are too easy to make stale during CUDA patch review.
 - **Next product loop:** prove one minimal end-to-end training run before polishing presentation. After the first checkpoint can be trained, saved, and loaded, build a cheap CLI/TUI replay/debug viewer before Godot so policy behavior, legal masks, rewards, terminal states, and cascade depths are inspectable without renderer ceremony.
 
+## Training Pivot Back To Torch
+
+Native PufferLib model work is paused as the primary route. The attempt to reproduce the design CNN inside PufferLib exposed the wrong coupling: custom architectures currently require editing the PufferLib fork, rebuilding CUDA internals, and debugging model math, precision, PPO semantics, and kernel plumbing at the same time. That loop is too slow and too opaque for the current milestone.
+
+The next learning milestone is therefore the repo-owned Torch PPO trainer:
+
+1. Treat `training/torch_ppo/model.py` as the canonical network implementation.
+2. Run through PufferTank so environment stepping still uses the same Ocean/Chain Reaction backend.
+3. First prove short finite runs with zero illegal sampled actions, finite losses, and JSON/W&B metrics.
+4. Then run checkpoint progression at a terminal-reaching cap (`max_turns >= 128`) and evaluate each checkpoint against random legal play under the same cap.
+5. Only after the exact design CNN learns measurably should we revisit native acceleration, Triton fusion, or a PufferLib extension seam.
+
+The native Puffer CNN checkpoint is a reproducible experiment, not the product direction. Its current shape is smaller than the design model and feeds PufferLib's MinGRU/default decoder rather than using spatial policy/value heads. It should not drive architecture decisions.
+
 ## Neural Network Shape
 
 The first model should be microscopic and spatially honest. The point is not to optimize a generic baseline; it is to make the model match the board and remain readable enough to learn from.
 
-Audit correction: this section describes the intended repo Torch CNN, implemented in `training/torch_ppo/model.py`. The native PufferLib path currently bypasses it and trains the default native policy instead: default linear encoder over 64 flat observation features, one MinGRU layer, and a linear decoder emitting 64 action logits plus one scalar value. Runtime logs print this explicitly; trust the logs over old design text.
+Audit correction: this section describes the intended repo Torch CNN, implemented in `training/torch_ppo/model.py`. The native PufferLib path must not be treated as equivalent unless it implements the same 32-channel, four-block, GroupNorm residual trunk with spatial policy/value heads. Runtime logs print the actual native model; trust the logs over stale intent.
 
 The first repo-owned training run should use this baseline unchanged unless it cannot execute. Its job is to prove the full data path, not to be strong. Tune architecture only after rollout collection, legal masking, sign-aware value targets, rewards, checkpointing, and policy inspection are visibly working.
 
