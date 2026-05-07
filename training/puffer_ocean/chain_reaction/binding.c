@@ -1,8 +1,8 @@
 #include "chain_reaction_ocean.h"
 
-#define OBS_SIZE 64
+#define OBS_SIZE CR_CELLS
 #define NUM_ATNS 1
-#define ACT_SIZES {64}
+#define ACT_SIZES {CR_CELLS}
 #define OBS_TENSOR_T FloatTensor
 
 #define Env ChainReactionOcean

@@ -1,9 +1,13 @@
 #pragma once
 #include <stdint.h>
 
+#ifndef CR_WIDTH
 #define CR_WIDTH 8
+#endif
+#ifndef CR_HEIGHT
 #define CR_HEIGHT 8
-#define CR_CELLS 64
+#endif
+#define CR_CELLS (CR_WIDTH * CR_HEIGHT)
 #define CR_PLAYERS 2
 #define CR_MAX_LOGGED_WAVES 64
 

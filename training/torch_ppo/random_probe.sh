@@ -18,7 +18,7 @@ if [ ! -f "$REPO_ROOT/core/chain_reaction.hpp" ]; then
     exit 1
 fi
 
-mkdir -p ocean config checkpoints logs "$REPO_ROOT/training/checkpoints/torch_ppo" "$REPO_ROOT/training/logs/torch_ppo"
+mkdir -p ocean config "$REPO_ROOT/training/evals/torch_ppo"
 rm -rf "ocean/$ENV_NAME" "config/$ENV_NAME.ini" chain_reaction_core
 ln -s "$REPO_ROOT/training/puffer_ocean/$ENV_NAME" "ocean/$ENV_NAME"
 ln -s "$REPO_ROOT/training/puffer_ocean/config/$ENV_NAME.ini" "config/$ENV_NAME.ini"
@@ -27,13 +27,9 @@ ln -s "$REPO_ROOT/core" chain_reaction_core
 EXTRA_CFLAGS="${EXTRA_CFLAGS:--I$REPO_ROOT} -DCR_WIDTH=$BOARD_SIZE -DCR_HEIGHT=$BOARD_SIZE" bash build.sh "$ENV_NAME" ${PUFFER_BUILD_ARGS:-}
 
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
-python "$REPO_ROOT/training/torch_ppo/train.py" \
-    --total-timesteps "${CHAIN_REACTION_TOTAL_TIMESTEPS:-10000000}" \
-    --total-agents "${CHAIN_REACTION_TOTAL_AGENTS:-4096}" \
-    --horizon "${CHAIN_REACTION_HORIZON:-64}" \
-    --minibatch-size "${CHAIN_REACTION_MINIBATCH_SIZE:-32768}" \
-    --max-turns "${CHAIN_REACTION_MAX_TURNS:-4096}" \
+python "$REPO_ROOT/training/torch_ppo/random_probe.py" \
     --board-size "$BOARD_SIZE" \
-    --checkpoint-interval "${CHAIN_REACTION_CHECKPOINT_INTERVAL:-20}" \
-    --checkpoint-dir "$REPO_ROOT/training/checkpoints/torch_ppo" \
-    --log-dir "$REPO_ROOT/training/logs/torch_ppo"
+    --games "${CHAIN_REACTION_PROBE_GAMES:-1000}" \
+    --total-agents "${CHAIN_REACTION_TOTAL_AGENTS:-1024}" \
+    --max-turns "${CHAIN_REACTION_MAX_TURNS:-4096}" \
+    --seed "${CHAIN_REACTION_SEED:-1}"

@@ -8,6 +8,23 @@ from training.torch_ppo.model import ChainReactionNet
 
 
 def main() -> None:
+    obs4 = torch.zeros(3, 16)
+    obs4[0, 0] = -1
+    obs4[1, 3] = -2
+    obs4[2, 15] = 1
+
+    model4 = ChainReactionNet(board_size=4)
+    logits4, values4 = model4(obs4)
+    assert logits4.shape == (3, 16)
+    assert values4.shape == (3,)
+
+    mask4 = legal_action_mask(obs4)
+    assert not mask4[0, 0]
+    assert mask4[0, 1]
+
+    masked4 = apply_legal_mask(logits4, obs4)
+    assert masked4[0, 0] < -1e30
+
     obs = torch.zeros(3, 64)
     obs[0, 0] = -1
     obs[1, 7] = -2

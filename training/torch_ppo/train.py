@@ -30,6 +30,7 @@ class TrainConfig:
     vf_coef: float = 0.5
     ent_coef: float = 0.01
     max_grad_norm: float = 1.0
+    board_size: int = 8
     max_turns: int = 4096
     seed: int = 73
     checkpoint_interval: int = 20
@@ -160,6 +161,16 @@ def maybe_compile_model(model: nn.Module, config: TrainConfig) -> nn.Module:
     return torch.compile(model, mode=config.compile_mode)
 
 
+def validate_env_shape(vec: PufferVec, config: TrainConfig) -> None:
+    expected_cells = config.board_size * config.board_size
+    if vec.obs_size != expected_cells:
+        raise RuntimeError(
+            f"env obs_size {vec.obs_size} does not match board_size "
+            f"{config.board_size} ({expected_cells} cells); rebuild the Ocean env "
+            "with matching CR_WIDTH/CR_HEIGHT"
+        )
+
+
 def ppo_update(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -225,8 +236,9 @@ def main() -> None:
     torch.backends.cudnn.allow_tf32 = True
 
     vec = PufferVec(load_puffer_args(config), sync_gpu_step=bool(config.sync_gpu_step))
+    validate_env_shape(vec, config)
     device = vec.device
-    checkpoint_model = ChainReactionNet().to(device)
+    checkpoint_model = ChainReactionNet(board_size=config.board_size).to(device)
     model = maybe_compile_model(checkpoint_model, config)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
 
@@ -237,6 +249,18 @@ def main() -> None:
     update = 0
     start_time = time.time()
     interval = IntervalAverager()
+
+    print(
+        " ".join(
+            [
+                f"board_size={config.board_size}",
+                f"obs_size={vec.obs_size}",
+                f"action_count={config.board_size * config.board_size}",
+                f"device={device}",
+            ]
+        ),
+        flush=True,
+    )
 
     obs_buf = torch.zeros(config.horizon, vec.total_agents, vec.obs_size, device=device)
     action_buf = torch.zeros(config.horizon, vec.total_agents, dtype=torch.long, device=device)

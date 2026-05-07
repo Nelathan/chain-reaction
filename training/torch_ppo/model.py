@@ -4,8 +4,7 @@ import torch
 from torch import nn
 
 
-BOARD_SIZE = 8
-ACTION_COUNT = BOARD_SIZE * BOARD_SIZE
+DEFAULT_BOARD_SIZE = 8
 
 
 class PreActResidualBlock(nn.Module):
@@ -27,6 +26,7 @@ class PreActResidualBlock(nn.Module):
 class ChainReactionNet(nn.Module):
     def __init__(
         self,
+        board_size: int = DEFAULT_BOARD_SIZE,
         channels: int = 32,
         blocks: int = 4,
         groups: int = 8,
@@ -34,6 +34,10 @@ class ChainReactionNet(nn.Module):
         value_hidden: int = 64,
     ):
         super().__init__()
+        if board_size <= 0:
+            raise ValueError(f"board_size must be positive, got {board_size}")
+        self.board_size = board_size
+        self.action_count = board_size * board_size
         self.stem = nn.Conv2d(1, channels, kernel_size=3, padding=1)
         self.trunk = nn.Sequential(*[
             PreActResidualBlock(channels=channels, groups=groups)
@@ -57,11 +61,11 @@ class ChainReactionNet(nn.Module):
 
     def _board(self, observations: torch.Tensor) -> torch.Tensor:
         if observations.ndim == 2:
-            observations = observations.view(observations.shape[0], 1, BOARD_SIZE, BOARD_SIZE)
+            observations = observations.view(observations.shape[0], 1, self.board_size, self.board_size)
         elif observations.ndim == 3:
             observations = observations.unsqueeze(1)
-        if observations.shape[-2:] != (BOARD_SIZE, BOARD_SIZE):
-            raise ValueError(f"expected 8x8 observations, got {tuple(observations.shape)}")
+        if observations.shape[-2:] != (self.board_size, self.board_size):
+            raise ValueError(f"expected {self.board_size}x{self.board_size} observations, got {tuple(observations.shape)}")
         return observations.float()
 
     def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
