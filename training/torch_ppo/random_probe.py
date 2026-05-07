@@ -9,10 +9,24 @@ from pathlib import Path
 
 import torch
 
+from training.torch_ppo.masking import compute_cells_mask
 from training.torch_ppo.puffer_vec import PufferVec
 
 
-def load_puffer_args(total_agents: int, max_turns: int, seed: int) -> dict:
+BOARD_SIZE = 8
+
+
+def sample_random_legal(observations: torch.Tensor, generator: torch.Generator, valid_cells_mask: torch.Tensor | None = None) -> torch.Tensor:
+    legal = observations >= 0
+    if valid_cells_mask is not None:
+        legal = legal & valid_cells_mask.to(device=legal.device)
+    if not bool(legal.any(dim=1).all().item()):
+        raise RuntimeError("encountered observation with no legal actions")
+    weights = legal.float()
+    return torch.multinomial(weights, 1, generator=generator).squeeze(1)
+
+
+def load_puffer_args(total_agents: int, max_turns: int, seed: int, active_width: int = 8, active_height: int = 8) -> dict:
     import pufferlib.pufferl
 
     argv = sys.argv
@@ -24,6 +38,8 @@ def load_puffer_args(total_agents: int, max_turns: int, seed: int) -> dict:
     args["vec"]["total_agents"] = total_agents
     args["vec"]["num_buffers"] = 1
     args["env"]["max_turns"] = max_turns
+    args["env"]["active_width"] = active_width
+    args["env"]["active_height"] = active_height
     args["train"]["horizon"] = 1
     args["train"]["minibatch_size"] = max(1, total_agents)
     args["seed"] = seed
@@ -31,14 +47,6 @@ def load_puffer_args(total_agents: int, max_turns: int, seed: int) -> dict:
     args["cudagraphs"] = -1
     args["profile"] = False
     return args
-
-
-def sample_random_legal(observations: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
-    legal = observations >= 0
-    if not bool(legal.any(dim=1).all().item()):
-        raise RuntimeError("encountered observation with no legal actions")
-    weights = legal.float()
-    return torch.multinomial(weights, 1, generator=generator).squeeze(1)
 
 
 def percentile(values: list[int], q: float) -> float | None:
@@ -55,6 +63,8 @@ def percentile(values: list[int], q: float) -> float | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Probe random-vs-random Chain Reaction terminal lengths.")
     parser.add_argument("--board-size", type=int, default=8)
+    parser.add_argument("--active-width", type=int, default=8, help="active region width")
+    parser.add_argument("--active-height", type=int, default=8, help="active region height")
     parser.add_argument("--games", type=int, default=1000)
     parser.add_argument("--total-agents", type=int, default=1024)
     parser.add_argument("--max-turns", type=int, default=4096)
@@ -72,7 +82,7 @@ def main() -> None:
 
     started = time.time()
     vec = PufferVec(
-        load_puffer_args(args.total_agents, args.max_turns, args.seed),
+        load_puffer_args(args.total_agents, args.max_turns, args.seed, args.active_width, args.active_height),
         sync_gpu_step=bool(args.sync_gpu_step),
     )
     expected_cells = args.board_size * args.board_size
@@ -82,6 +92,8 @@ def main() -> None:
             f"env obs_size {vec.obs_size} does not match board_size "
             f"{args.board_size} ({expected_cells} cells)"
         )
+
+    valid_cells_mask = compute_cells_mask(BOARD_SIZE, args.active_width, args.active_height).to(vec.device)
 
     generator = torch.Generator(device=vec.device)
     generator.manual_seed(args.seed)
@@ -98,7 +110,7 @@ def main() -> None:
     try:
         while completed < args.games:
             acting_player = current_player.clone()
-            actions = sample_random_legal(vec.observations.float(), generator)
+            actions = sample_random_legal(vec.observations.float(), generator, valid_cells_mask)
             vec.step(actions)
             episode_lengths += 1
 
@@ -138,6 +150,8 @@ def main() -> None:
 
     report = {
         "board_size": args.board_size,
+        "active_width": args.active_width,
+        "active_height": args.active_height,
         "obs_size": expected_cells,
         "requested_games": args.games,
         "games": min(completed, args.games),

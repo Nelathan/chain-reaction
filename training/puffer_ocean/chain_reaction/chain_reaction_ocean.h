@@ -39,6 +39,8 @@ typedef struct {
     int max_turns;
     int current_player;
     unsigned int rng;
+    int active_width;
+    int active_height;
     GameState state;
 } ChainReactionOcean;
 
@@ -69,6 +71,7 @@ static inline void cr_ocean_add_game_log(ChainReactionOcean* env, float p1_resul
 
 static inline void cr_ocean_reset_state(ChainReactionOcean* env) {
     cr_init(&env->state);
+    cr_set_active_region(&env->state, env->active_width, env->active_height);
     env->current_player = 1;
     cr_ocean_write_observation(env);
 }

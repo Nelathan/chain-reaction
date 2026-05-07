@@ -4,6 +4,8 @@ set -euo pipefail
 PUFFER_ROOT="${PUFFER_ROOT:-/puffertank/pufferlib}"
 REPO_ROOT="${CHAIN_REACTION_REPO:-/workspace/chain-reaction}"
 ENV_NAME="chain_reaction"
+ACTIVE_WIDTH="${CHAIN_REACTION_ACTIVE_WIDTH:-8}"
+ACTIVE_HEIGHT="${CHAIN_REACTION_ACTIVE_HEIGHT:-8}"
 BOARD_SIZE="${CHAIN_REACTION_BOARD_SIZE:-8}"
 
 cd "$PUFFER_ROOT"
@@ -24,11 +26,13 @@ ln -s "$REPO_ROOT/training/puffer_ocean/$ENV_NAME" "ocean/$ENV_NAME"
 ln -s "$REPO_ROOT/training/puffer_ocean/config/$ENV_NAME.ini" "config/$ENV_NAME.ini"
 ln -s "$REPO_ROOT/core" chain_reaction_core
 
-EXTRA_CFLAGS="${EXTRA_CFLAGS:--I$REPO_ROOT} -DCR_WIDTH=$BOARD_SIZE -DCR_HEIGHT=$BOARD_SIZE" bash build.sh "$ENV_NAME" ${PUFFER_BUILD_ARGS:-}
+EXTRA_CFLAGS="${EXTRA_CFLAGS:--I$REPO_ROOT}" bash build.sh "$ENV_NAME" ${PUFFER_BUILD_ARGS:-}
 
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 python "$REPO_ROOT/training/torch_ppo/random_probe.py" \
     --board-size "$BOARD_SIZE" \
+    --active-width "$ACTIVE_WIDTH" \
+    --active-height "$ACTIVE_HEIGHT" \
     --games "${CHAIN_REACTION_PROBE_GAMES:-1000}" \
     --total-agents "${CHAIN_REACTION_TOTAL_AGENTS:-1024}" \
     --max-turns "${CHAIN_REACTION_MAX_TURNS:-4096}" \

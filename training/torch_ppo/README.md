@@ -14,6 +14,10 @@ podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer \
 
 The script builds the Ocean environment, then runs `training/torch_ppo/train.py` instead of PufferLib's native CUDA trainer.
 
+To continue from a saved checkpoint on a new board size, set `CHAIN_REACTION_INIT_CHECKPOINT=/path/to/checkpoint.pt`. The model weights load, the optimizer starts fresh, and reports record both source and target board sizes.
+
+For the post-training verdict across curriculum sizes `3x3` through `8x8`, use `training/torch_ppo/final_eval.py`.
+
 To log the repo-owned trainer to Weights & Biases, export `WANDB_API_KEY` on the host and enable the trainer flag through Compose:
 
 ```bash

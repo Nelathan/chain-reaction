@@ -10,6 +10,7 @@
 #define CR_CELLS (CR_WIDTH * CR_HEIGHT)
 #define CR_PLAYERS 2
 #define CR_MAX_LOGGED_WAVES 64
+#define CR_FULL_MASK 0xFFFFFFFFFFFFFFFFULL
 
 struct GameState {
     int8_t tokens[CR_CELLS];
@@ -17,6 +18,7 @@ struct GameState {
     int16_t turn_count;
     int8_t players_alive_mask;
     int8_t last_move_exploded;
+    uint64_t valid_cells_mask;
 };
 
 struct WaveLog {
@@ -52,12 +54,42 @@ inline int8_t cr_mask_to_player(int8_t mask) {
     return 0;
 }
 
-inline int8_t cr_get_mass(int idx) {
+// Returns 1 if the cell index is within the active region.
+inline int cr_is_valid_cell(int idx, uint64_t valid_mask) {
+    if (idx < 0 || idx >= CR_CELLS) return 0;
+    return (valid_mask & (1ULL << idx)) != 0;
+}
+
+// Sets the valid_cells_mask to the top-left W×H rectangle.
+// W and H are clamped to [0, CR_WIDTH] / [0, CR_HEIGHT].
+inline void cr_set_active_region(GameState* state, int w, int h) {
+    if (w < 0) w = 0;
+    if (w > CR_WIDTH) w = CR_WIDTH;
+    if (h < 0) h = 0;
+    if (h > CR_HEIGHT) h = CR_HEIGHT;
+    uint64_t mask = 0;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            mask |= (1ULL << (y * CR_WIDTH + x));
+        }
+    }
+    state->valid_cells_mask = mask;
+}
+
+// Critical mass: starts at 4, loses 1 for each missing valid neighbor.
+inline int8_t cr_get_mass(int idx, uint64_t valid_mask) {
     int x = idx % CR_WIDTH;
     int y = idx / CR_WIDTH;
     int8_t mass = 4;
-    if (x == 0 || x == CR_WIDTH - 1) mass--;
-    if (y == 0 || y == CR_HEIGHT - 1) mass--;
+    int up_idx = idx - CR_WIDTH;
+    int down_idx = idx + CR_WIDTH;
+    int left_idx = idx - 1;
+    int right_idx = idx + 1;
+    if (y == 0 || !cr_is_valid_cell(up_idx, valid_mask)) mass--;
+    if (y == CR_HEIGHT - 1 || !cr_is_valid_cell(down_idx, valid_mask)) mass--;
+    if (x == 0 || !cr_is_valid_cell(left_idx, valid_mask)) mass--;
+    if (x == CR_WIDTH - 1 || !cr_is_valid_cell(right_idx, valid_mask)) mass--;
+    if (mass < 1) mass = 1;
     return mass;
 }
 
@@ -69,6 +101,7 @@ inline void cr_init(GameState* state) {
     state->turn_count = 0;
     state->players_alive_mask = cr_all_players_mask();
     state->last_move_exploded = 0;
+    state->valid_cells_mask = CR_FULL_MASK;
 }
 
 inline void cr_copy_cells(int8_t* dst, const int8_t* src) {
@@ -96,6 +129,7 @@ inline void cr_init_wave_log(WaveLog* log) {
 inline int cr_is_legal_move(const GameState* state, int action_idx, int8_t player_id) {
     if (player_id < 1 || player_id > CR_PLAYERS) return 0;
     if (action_idx < 0 || action_idx >= CR_CELLS) return 0;
+    if (!cr_is_valid_cell(action_idx, state->valid_cells_mask)) return 0;
     if (cr_count_bits(state->players_alive_mask) == 1) return 0;
     if ((state->players_alive_mask & cr_player_bit(player_id)) == 0) return 0;
     return state->owners[action_idx] == 0 || state->owners[action_idx] == player_id;
@@ -141,6 +175,7 @@ inline void cr_log_wave(const GameState* state, WaveLog* log, const int8_t* expl
 
 inline int cr_resolve_wave(GameState* state, WaveLog* log, int8_t* next_tokens, int8_t* next_owners, int8_t* pressure, int8_t* exploded_cells) {
     int exploded = 0;
+    uint64_t valid = state->valid_cells_mask;
 
     cr_copy_cells(next_tokens, state->tokens);
     cr_copy_cells(next_owners, state->owners);
@@ -149,10 +184,11 @@ inline int cr_resolve_wave(GameState* state, WaveLog* log, int8_t* next_tokens, 
     cr_zero_cells(exploded_cells);
 
     for (int i = 0; i < CR_CELLS; ++i) {
+        if (!cr_is_valid_cell(i, valid)) continue;
         int8_t owner = state->owners[i];
         if (owner == 0) continue;
 
-        int8_t mass = cr_get_mass(i);
+        int8_t mass = cr_get_mass(i, valid);
         if (state->tokens[i] >= mass) {
             exploded = 1;
             exploded_cells[i] = 1;
@@ -163,11 +199,15 @@ inline int cr_resolve_wave(GameState* state, WaveLog* log, int8_t* next_tokens, 
 
             int x = i % CR_WIDTH;
             int y = i / CR_WIDTH;
+            int up_idx = i - CR_WIDTH;
+            int down_idx = i + CR_WIDTH;
+            int left_idx = i - 1;
+            int right_idx = i + 1;
 
-            if (y > 0) cr_add_pressure(pressure, i - CR_WIDTH, owner);
-            if (y < CR_HEIGHT - 1) cr_add_pressure(pressure, i + CR_WIDTH, owner);
-            if (x > 0) cr_add_pressure(pressure, i - 1, owner);
-            if (x < CR_WIDTH - 1) cr_add_pressure(pressure, i + 1, owner);
+            if (y > 0 && cr_is_valid_cell(up_idx, valid)) cr_add_pressure(pressure, up_idx, owner);
+            if (y < CR_HEIGHT - 1 && cr_is_valid_cell(down_idx, valid)) cr_add_pressure(pressure, down_idx, owner);
+            if (x > 0 && cr_is_valid_cell(left_idx, valid)) cr_add_pressure(pressure, left_idx, owner);
+            if (x < CR_WIDTH - 1 && cr_is_valid_cell(right_idx, valid)) cr_add_pressure(pressure, right_idx, owner);
         }
     }
 
@@ -182,7 +222,9 @@ inline int cr_resolve_wave(GameState* state, WaveLog* log, int8_t* next_tokens, 
 
 inline void cr_update_alive_mask(GameState* state) {
     int8_t alive = 0;
+    uint64_t valid = state->valid_cells_mask;
     for (int i = 0; i < CR_CELLS; ++i) {
+        if (!cr_is_valid_cell(i, valid)) continue;
         int8_t owner = state->owners[i];
         if (owner >= 1 && owner <= CR_PLAYERS) alive |= cr_player_bit(owner);
     }
@@ -246,14 +288,21 @@ inline void cr_write_legal_actions(const GameState* state, int8_t player_id, int
 }
 
 inline void cr_write_observation(const GameState* state, int8_t player_id, int8_t* out_observation) {
+    uint64_t valid = state->valid_cells_mask;
     for (int i = 0; i < CR_CELLS; ++i) {
+        if (!cr_is_valid_cell(i, valid)) {
+            // Inactive cells: value 0 (empty). The Python legal mask will
+            // AND with valid_cells_mask to prevent sampling these cells.
+            out_observation[i] = 0;
+            continue;
+        }
         int8_t owner = state->owners[i];
         if (owner == 0) {
             out_observation[i] = 0;
         } else if (owner == player_id) {
-            out_observation[i] = (int8_t)(cr_get_mass(i) - state->tokens[i]);
+            out_observation[i] = (int8_t)(cr_get_mass(i, valid) - state->tokens[i]);
         } else {
-            out_observation[i] = (int8_t)((cr_get_mass(i) - state->tokens[i]) * -1);
+            out_observation[i] = (int8_t)((cr_get_mass(i, valid) - state->tokens[i]) * -1);
         }
     }
 }

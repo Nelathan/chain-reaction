@@ -10,12 +10,15 @@ from pathlib import Path
 
 import torch
 
-from training.torch_ppo.masking import apply_legal_mask
+from training.torch_ppo.masking import apply_legal_mask, compute_cells_mask
 from training.torch_ppo.model import ChainReactionNet
 from training.torch_ppo.puffer_vec import PufferVec
 
 
-def load_puffer_args(total_agents: int, max_turns: int, seed: int) -> dict:
+BOARD_SIZE = 8  # fixed compile-time constant
+
+
+def load_puffer_args(total_agents: int, max_turns: int, seed: int, active_width: int = 8, active_height: int = 8) -> dict:
     import pufferlib.pufferl
 
     argv = sys.argv
@@ -27,6 +30,8 @@ def load_puffer_args(total_agents: int, max_turns: int, seed: int) -> dict:
     args["vec"]["total_agents"] = total_agents
     args["vec"]["num_buffers"] = 1
     args["env"]["max_turns"] = max_turns
+    args["env"]["active_width"] = active_width
+    args["env"]["active_height"] = active_height
     args["train"]["horizon"] = 1
     args["train"]["minibatch_size"] = max(1, total_agents)
     args["seed"] = seed
@@ -36,8 +41,10 @@ def load_puffer_args(total_agents: int, max_turns: int, seed: int) -> dict:
     return args
 
 
-def sample_random_legal(observations: torch.Tensor, generator: torch.Generator) -> torch.Tensor:
-    legal = observations >= 0
+def sample_random_legal(observations: torch.Tensor, generator: torch.Generator, valid_cells_mask: torch.Tensor | None = None) -> torch.Tensor:
+    legal = observations.float() >= 0
+    if valid_cells_mask is not None:
+        legal = legal & valid_cells_mask.to(device=legal.device)
     if not bool(legal.any(dim=1).all().item()):
         raise RuntimeError("encountered observation with no legal actions")
     return torch.multinomial(legal.float(), 1, generator=generator).squeeze(1)
@@ -48,10 +55,11 @@ def sample_policy_actions(
     observations: torch.Tensor,
     temperature: float,
     generator: torch.Generator,
+    valid_cells_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     with torch.no_grad():
         logits, _values = model(observations.float())
-        masked_logits = apply_legal_mask(logits, observations.float())
+        masked_logits = apply_legal_mask(logits, observations.float(), valid_cells_mask)
         if temperature <= 0.0:
             return masked_logits.argmax(dim=1)
         return torch.multinomial(torch.softmax(masked_logits / temperature, dim=1), 1, generator=generator).squeeze(1)
@@ -78,20 +86,22 @@ def percentile(values: list[int], q: float) -> float | None:
     return ordered[lo] * (1.0 - frac) + ordered[hi] * frac
 
 
-def load_checkpoint(path: Path, requested_board_size: int | None, force_board_size: bool) -> tuple[dict, int]:
+def load_checkpoint(path: Path, requested_board_size: int | None) -> tuple[dict, int, int]:
     checkpoint = torch.load(path, map_location="cpu")
     config = checkpoint.get("config", {})
     checkpoint_board_size = int(config.get("board_size", 8))
     board_size = requested_board_size if requested_board_size is not None else checkpoint_board_size
-    if requested_board_size is not None and requested_board_size != checkpoint_board_size and not force_board_size:
-        raise SystemExit(
-            f"checkpoint board_size {checkpoint_board_size} does not match requested "
-            f"board_size {requested_board_size}; pass --force-board-size only for explicit shape experiments"
-        )
-    return checkpoint, board_size
+    return checkpoint, checkpoint_board_size, board_size
 
 
-def run_seat(args: argparse.Namespace, model: torch.nn.Module, checkpoint_seat: int, games: int) -> dict:
+def run_seat(
+    args: argparse.Namespace,
+    model: torch.nn.Module,
+    checkpoint_seat: int,
+    games: int,
+    opponent_model: torch.nn.Module | None = None,
+    valid_cells_mask: torch.Tensor | None = None,
+) -> dict:
     if games <= 0:
         return {
             "games": 0,
@@ -105,7 +115,10 @@ def run_seat(args: argparse.Namespace, model: torch.nn.Module, checkpoint_seat: 
         }
 
     vec = PufferVec(
-        load_puffer_args(args.total_agents, args.max_turns, args.seed + checkpoint_seat),
+        load_puffer_args(
+            args.total_agents, args.max_turns, args.seed + checkpoint_seat,
+            getattr(args, "active_width", 8), getattr(args, "active_height", 8),
+        ),
         sync_gpu_step=bool(args.sync_gpu_step),
     )
     expected_cells = args.board_size * args.board_size
@@ -141,9 +154,19 @@ def run_seat(args: argparse.Namespace, model: torch.nn.Module, checkpoint_seat: 
                     obs_snapshot[policy_turn],
                     args.temperature,
                     generator,
+                    valid_cells_mask,
                 )
             if bool((~policy_turn).any().item()):
-                actions[~policy_turn] = sample_random_legal(obs_snapshot[~policy_turn], generator)
+                if opponent_model is not None:
+                    actions[~policy_turn] = sample_policy_actions(
+                        opponent_model,
+                        obs_snapshot[~policy_turn],
+                        args.opponent_temperature,
+                        generator,
+                        valid_cells_mask,
+                    )
+                else:
+                    actions[~policy_turn] = sample_random_legal(obs_snapshot[~policy_turn], generator, valid_cells_mask)
 
             chosen_legal = obs_snapshot.gather(1, actions.view(-1, 1)).squeeze(1) >= 0
             if not bool(chosen_legal.all().item()):
@@ -208,14 +231,17 @@ def split_games(total: int, checkpoint_player: str) -> tuple[int, int]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate a Torch PPO checkpoint against random legal play.")
+    parser = argparse.ArgumentParser(description="Evaluate a Torch PPO checkpoint against random legal play or another checkpoint.")
     parser.add_argument("--checkpoint", required=True, type=Path)
+    parser.add_argument("--opponent-checkpoint", type=Path, default=None)
     parser.add_argument("--games", type=int, default=1000)
     parser.add_argument("--total-agents", type=int, default=1024)
-    parser.add_argument("--board-size", type=int, default=None)
-    parser.add_argument("--force-board-size", action="store_true")
+    parser.add_argument("--board-size", type=int, default=BOARD_SIZE, help="model board size (always 8)")
+    parser.add_argument("--active-width", type=int, default=8, help="active region width")
+    parser.add_argument("--active-height", type=int, default=8, help="active region height")
     parser.add_argument("--max-turns", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--opponent-temperature", type=float, default=0.0)
     parser.add_argument("--checkpoint-player", choices=("both", "p1", "p2"), default="both")
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--sync-gpu-step", type=int, default=0)
@@ -229,8 +255,23 @@ def main() -> None:
     if not args.checkpoint.exists():
         raise SystemExit(f"checkpoint not found: {args.checkpoint}")
 
-    checkpoint, board_size = load_checkpoint(args.checkpoint, args.board_size, args.force_board_size)
+    checkpoint, checkpoint_board_size, board_size = load_checkpoint(args.checkpoint, args.board_size)
     args.board_size = board_size
+    active_w = args.active_width
+    active_h = args.active_height
+    valid_cells_mask = compute_cells_mask(BOARD_SIZE, active_w, active_h)
+    if board_size != checkpoint_board_size:
+        print(
+            " ".join(
+                [
+                    "warning:",
+                    f"evaluating checkpoint_board_size={checkpoint_board_size}",
+                    f"at target_board_size={board_size}",
+                    f"checkpoint={args.checkpoint}",
+                ]
+            ),
+            flush=True,
+        )
     model = ChainReactionNet(board_size=board_size)
     model.load_state_dict(checkpoint["model"])
 
@@ -240,7 +281,7 @@ def main() -> None:
     # Create the first vec before moving the model so the evaluator follows the
     # same CPU/GPU backend selected by PufferLib. The model is then reused across
     # both seat runs on that device.
-    device_probe = PufferVec(load_puffer_args(1, args.max_turns, args.seed), sync_gpu_step=bool(args.sync_gpu_step))
+    device_probe = PufferVec(load_puffer_args(1, args.max_turns, args.seed, active_w, active_h), sync_gpu_step=bool(args.sync_gpu_step))
     device = device_probe.device
     if device_probe.obs_size != board_size * board_size:
         actual = device_probe.obs_size
@@ -248,9 +289,21 @@ def main() -> None:
         raise SystemExit(f"env obs_size {actual} does not match board_size {board_size}")
     device_probe.close()
     model = model.to(device).eval()
+    valid_cells_mask = valid_cells_mask.to(device)
 
-    p1 = run_seat(args, model, 1, p1_games)
-    p2 = run_seat(args, model, 2, p2_games)
+    opponent_model = None
+    opponent_checkpoint_board_size: int | None = None
+    if args.opponent_checkpoint is not None:
+        if not args.opponent_checkpoint.exists():
+            raise SystemExit(f"opponent checkpoint not found: {args.opponent_checkpoint}")
+        opp_ckpt, opp_ckpt_board_size, _ = load_checkpoint(args.opponent_checkpoint, board_size)
+        opponent_model = ChainReactionNet(board_size=board_size)
+        opponent_model.load_state_dict(opp_ckpt["model"])
+        opponent_model = opponent_model.to(device).eval()
+        opponent_checkpoint_board_size = opp_ckpt_board_size
+
+    p1 = run_seat(args, model, 1, p1_games, opponent_model, valid_cells_mask)
+    p2 = run_seat(args, model, 2, p2_games, opponent_model, valid_cells_mask)
 
     lengths = p1["episode_lengths"] + p2["episode_lengths"]
     terminal_rewards = p1["terminal_rewards"] + p2["terminal_rewards"]
@@ -267,6 +320,10 @@ def main() -> None:
     report = {
         "checkpoint": str(args.checkpoint),
         "checkpoint_step": checkpoint.get("step"),
+        "checkpoint_board_size": checkpoint_board_size,
+        "target_board_size": board_size,
+        "active_width": active_w,
+        "active_height": active_h,
         "board_size": board_size,
         "obs_size": board_size * board_size,
         "games": total_games,
@@ -292,6 +349,11 @@ def main() -> None:
         "max_turns": args.max_turns,
         "temperature": args.temperature,
         "seed": args.seed,
+        "transfer_source_checkpoint": checkpoint.get("transfer_source_checkpoint"),
+        "transfer_source_board_size": checkpoint.get("transfer_source_board_size"),
+        "opponent_checkpoint": str(args.opponent_checkpoint) if args.opponent_checkpoint is not None else None,
+        "opponent_checkpoint_board_size": opponent_checkpoint_board_size,
+        "opponent_temperature": args.opponent_temperature if args.opponent_checkpoint is not None else None,
         "elapsed_seconds": time.time() - started,
     }
 
@@ -299,7 +361,8 @@ def main() -> None:
         repo_root = Path(os.environ.get("CHAIN_REACTION_REPO", Path.cwd())).resolve()
         output_dir = repo_root / "training" / "evals" / "torch_ppo"
         output_dir.mkdir(parents=True, exist_ok=True)
-        args.output = output_dir / f"eval_{board_size}x{board_size}_{int(started * 1000)}.json"
+        opponent_tag = "_vs_checkpoint" if args.opponent_checkpoint is not None else ""
+        args.output = output_dir / f"eval_{checkpoint_board_size}x{checkpoint_board_size}_to_{board_size}x{board_size}{opponent_tag}_{int(started * 1000)}.json"
     else:
         args.output.parent.mkdir(parents=True, exist_ok=True)
 
@@ -308,7 +371,8 @@ def main() -> None:
         " ".join(
             [
                 f"games={report['games']}",
-                f"board_size={report['board_size']}",
+                f"checkpoint_board_size={report['checkpoint_board_size']}",
+                f"target_board_size={report['target_board_size']}",
                 f"checkpoint_player1_winrate={report['checkpoint_player1_winrate']}",
                 f"checkpoint_player2_winrate={report['checkpoint_player2_winrate']}",
                 f"combined_winrate={report['combined_winrate']}",

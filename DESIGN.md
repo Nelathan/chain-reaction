@@ -143,6 +143,85 @@ The repo-owned Torch CNN treats board size as a run parameter, not as model iden
 
 Checkpoint metadata must still record the source board size for provenance, reproducibility, and accidental-mismatch detection. But planned evaluation and fine-tuning on a different target board size should be a first-class path, not an exceptional hidden bypass. Reports must include both source checkpoint board size and target board size.
 
+Each curriculum size gets its own truncation cap and should be checked against random-vs-random episode lengths before learning starts. `max_turns` is therefore per-size, not a global doctrine.
+
+Use these rollout rules of record:
+
+- `horizon` defaults to `32` for curriculum runs to keep the rollout-to-update ratio practical at 1024 agents. Single-size dedicated training may use `128` for longer trajectories.
+- `max_turns` is size-specific and chosen from measured episode lengths (see per-size caps below). `horizon` and truncation solve different problems: horizon chunks PPO updates per board size; truncation prevents runaway games.
+
+### 8x8 Cold Transfer (measured 2026-05-07)
+
+```text
+source checkpoint: training/checkpoints/torch_ppo/1778140129666_0000000010027008.pt  (4x4, 99.8%)
+target board: 8x8
+config: total_agents=1024, horizon=128, minibatch_size=8192, max_turns=128, compile_model=1
+run: 10M impressions, ~42K SPS
+```
+
+Result: **immediate 100% combined win rate** against random legal play from the first interim eval (update 10). Zero illegal selected actions, zero truncations throughout.
+
+This means random-legal-play is now a dead benchmark for transferred models on 8x8. It remains useful as a sanity check and for scratch-training baselines, but it cannot measure strength beyond the 4x4→8x8 transfer floor. The next honest skill test is self-play.
+
+Throughput breakdown per PPO update (128 horizon × 1024 agents = 131K impressions):
+- rollout: ~470ms
+- PPO update loop: ~2340ms
+- total per update: ~2800ms
+
+The PPO update dominates, not the rollout. Speeding up the update loop (Triton kernel fusion, larger minibatches, fewer epochs) is the next optimization target.
+
+Curriculum policy (implemented 2026-05-07, session 3):
+
+- **Round-robin batch scheduler.** `train.py` manages all sizes in one session. No process restarts, no separate stages.
+- **Step-based unlocks.** New sizes join the round-robin at fixed update thresholds (unlock_interval=100 updates). Starting size is 3×3, with 4×4 through 8×8 joining every 100 updates.
+- **One update per size, then rotate.** Each PPO update trains a single board size; the next update picks the next unlocked size in a round-robin cycle.
+- **PufferVec recreation on switch.** The Ocean vec is destroyed and recreated with the new `active_width`/`active_height`. Cost is ~10ms per switch vs ~2800ms PPO update — negligible.
+- **Eval every 100 updates** on the current training size (32 games against random legal play). **Sweep eval every 500 updates** across all unlocked sizes (64 games each).
+- **Final sweep eval** across all sizes 3×3 through 8×8 at the end of training.
+- **Single Ocean compilation** at 8×8, same as the geometry mask approach. No recompile between sizes.
+- **Total budget:** 32M impressions default, ~1000 updates at 1024 agents × 32 horizon. The goal is a model that performs well on all board sizes, not one checkpoint per size.
+
+## Geometry Mask (implemented 2026-05-07)
+
+The board-size curriculum no longer requires recompiling the Ocean environment per size. Instead:
+
+- `CR_WIDTH=8, CR_HEIGHT=8` are fixed compile-time constants. The Ocean env, CNN, and action space always operate at 8×8 (64 cells).
+- `active_width` and `active_height` control the playable region at runtime. The C++ core uses a `valid_cells_mask` (64-bit bitmap) to restrict cascades, critical mass, legality, and alive-player detection to the active region.
+- The Python side computes an identical mask from `active_width × active_height` and ANDs it with the observation-sign legal mask: `legal = (obs >= 0) & valid_cells_mask`.
+- Inactive cells appear as 0 (empty) in the observation; the separate mask prevents them from being sampled.
+- The model architecture, optimizer state, and compiled Ocean binary persist across curriculum stages. Only `active_width`/`active_height` change.
+
+This eliminates rebuild overhead (~30s per size) and optimizer amnesia between sizes. The training loop never resets model parameters or optimizer momentum.
+
+### Per-Size Caps (measured 2026-05-07)
+
+```text
+size  p99.5  cap
+3x3   15     16
+4x4   29     32
+5x5   48     64
+6x6   70     80
+7x7   97     104
+8x8   128    136
+```
+
+### Curriculum Results (mask approach, optimizer persistent, 2026-05-07)
+
+Each size trained for 10 updates (1.3M impressions) before promoting at 90%+ 32-game interim winrate. Zero illegal actions, zero truncations throughout.
+
+Final 1000-game evals against random legal play:
+
+```text
+3x3: 79.6% (P1=70.4%, P2=88.8%)
+4x4: 74.7% (P1=75.8%, P2=73.6%)
+5x5: 74.8% (P1=75.0%, P2=74.6%)
+6x6: 76.3% (P1=78.6%, P2=74.0%)
+7x7: 83.6% (P1=80.0%, P2=87.2%)
+8x8: 84.9% (P1=85.4%, P2=84.4%)
+```
+
+These are below the dedicated 4x4 model (99.8%) because each size only received 10 updates. More updates per size with optimizer persistence is the next lever.
+
 Current measured reference:
 
 ```text

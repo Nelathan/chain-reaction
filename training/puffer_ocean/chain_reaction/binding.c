@@ -11,6 +11,8 @@
 void my_init(Env* env, Dict* kwargs) {
     env->num_agents = 1;
     env->max_turns = (int)dict_get(kwargs, "max_turns")->value;
+    env->active_width = (int)dict_get(kwargs, "active_width")->value;
+    env->active_height = (int)dict_get(kwargs, "active_height")->value;
 }
 
 void my_log(Log* log, Dict* out) {
