@@ -28,7 +28,8 @@ echo "Using PufferLib at $PUFFER_ROOT"
 echo "Using Chain Reaction repo at $REPO_ROOT"
 echo "Building Ocean environment: $ENV_NAME"
 
-EXTRA_CFLAGS="${EXTRA_CFLAGS:--I$REPO_ROOT}" bash build.sh "$ENV_NAME" ${PUFFER_BUILD_ARGS:-}
+PUFFER_BUILD_ARGS="${PUFFER_BUILD_ARGS---float}"
+EXTRA_CFLAGS="${EXTRA_CFLAGS:--I$REPO_ROOT}" bash build.sh "$ENV_NAME" $PUFFER_BUILD_ARGS
 
 if [ "${BUILD_ONLY:-0}" = "1" ]; then
     echo "BUILD_ONLY=1; skipping training."
