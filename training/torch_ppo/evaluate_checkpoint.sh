@@ -4,8 +4,6 @@ set -euo pipefail
 PUFFER_ROOT="${PUFFER_ROOT:-/puffertank/pufferlib}"
 REPO_ROOT="${CHAIN_REACTION_REPO:-/workspace/chain-reaction}"
 ENV_NAME="chain_reaction"
-ACTIVE_WIDTH="${CHAIN_REACTION_ACTIVE_WIDTH:-8}"
-ACTIVE_HEIGHT="${CHAIN_REACTION_ACTIVE_HEIGHT:-8}"
 CHECKPOINT="${CHAIN_REACTION_CHECKPOINT:-}"
 
 if [ -z "$CHECKPOINT" ]; then
@@ -37,8 +35,6 @@ export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 eval_args=(
     python "$REPO_ROOT/training/torch_ppo/evaluate_checkpoint.py"
     --checkpoint "$CHECKPOINT"
-    --active-width "$ACTIVE_WIDTH"
-    --active-height "$ACTIVE_HEIGHT"
     --games "${CHAIN_REACTION_EVAL_GAMES:-1000}"
     --total-agents "${CHAIN_REACTION_TOTAL_AGENTS:-1024}"
     --max-turns "${CHAIN_REACTION_MAX_TURNS:-512}"

@@ -18,7 +18,7 @@ from training.torch_ppo.puffer_vec import PufferVec
 BOARD_SIZE = 8  # fixed compile-time constant
 
 
-def load_puffer_args(total_agents: int, max_turns: int, seed: int, active_width: int = 8, active_height: int = 8) -> dict:
+def load_puffer_args(total_agents: int, max_turns: int, seed: int, board_size: int = 8) -> dict:
     import pufferlib.pufferl
 
     argv = sys.argv
@@ -30,8 +30,8 @@ def load_puffer_args(total_agents: int, max_turns: int, seed: int, active_width:
     args["vec"]["total_agents"] = total_agents
     args["vec"]["num_buffers"] = 1
     args["env"]["max_turns"] = max_turns
-    args["env"]["active_width"] = active_width
-    args["env"]["active_height"] = active_height
+    args["env"]["active_width"] = board_size
+    args["env"]["active_height"] = board_size
     args["train"]["horizon"] = 1
     args["train"]["minibatch_size"] = max(1, total_agents)
     args["seed"] = seed
@@ -114,13 +114,7 @@ def run_seat(
             "env_log": {},
         }
 
-    vec = PufferVec(
-        load_puffer_args(
-            args.total_agents, args.max_turns, args.seed + checkpoint_seat,
-            getattr(args, "active_width", 8), getattr(args, "active_height", 8),
-        ),
-        sync_gpu_step=bool(args.sync_gpu_step),
-    )
+    vec = PufferVec(load_puffer_args(args.total_agents, args.max_turns, args.seed + checkpoint_seat, args.board_size), sync_gpu_step=bool(args.sync_gpu_step))
     expected_cells = args.board_size * args.board_size
     if vec.obs_size != expected_cells:
         vec.close()
@@ -237,8 +231,6 @@ def main() -> None:
     parser.add_argument("--games", type=int, default=1000)
     parser.add_argument("--total-agents", type=int, default=1024)
     parser.add_argument("--board-size", type=int, default=BOARD_SIZE, help="model board size (always 8)")
-    parser.add_argument("--active-width", type=int, default=8, help="active region width")
-    parser.add_argument("--active-height", type=int, default=8, help="active region height")
     parser.add_argument("--max-turns", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--opponent-temperature", type=float, default=0.0)
@@ -257,9 +249,6 @@ def main() -> None:
 
     checkpoint, checkpoint_board_size, board_size = load_checkpoint(args.checkpoint, args.board_size)
     args.board_size = board_size
-    active_w = args.active_width
-    active_h = args.active_height
-    valid_cells_mask = compute_cells_mask(BOARD_SIZE, active_w, active_h)
     if board_size != checkpoint_board_size:
         print(
             " ".join(
@@ -281,7 +270,7 @@ def main() -> None:
     # Create the first vec before moving the model so the evaluator follows the
     # same CPU/GPU backend selected by PufferLib. The model is then reused across
     # both seat runs on that device.
-    device_probe = PufferVec(load_puffer_args(1, args.max_turns, args.seed, active_w, active_h), sync_gpu_step=bool(args.sync_gpu_step))
+    device_probe = PufferVec(load_puffer_args(1, args.max_turns, args.seed, board_size), sync_gpu_step=bool(args.sync_gpu_step))
     device = device_probe.device
     if device_probe.obs_size != board_size * board_size:
         actual = device_probe.obs_size
@@ -289,7 +278,7 @@ def main() -> None:
         raise SystemExit(f"env obs_size {actual} does not match board_size {board_size}")
     device_probe.close()
     model = model.to(device).eval()
-    valid_cells_mask = valid_cells_mask.to(device)
+    valid_cells_mask = compute_cells_mask(board_size, board_size, board_size).to(device)
 
     opponent_model = None
     opponent_checkpoint_board_size: int | None = None
@@ -322,8 +311,6 @@ def main() -> None:
         "checkpoint_step": checkpoint.get("step"),
         "checkpoint_board_size": checkpoint_board_size,
         "target_board_size": board_size,
-        "active_width": active_w,
-        "active_height": active_h,
         "board_size": board_size,
         "obs_size": board_size * board_size,
         "games": total_games,

@@ -41,7 +41,9 @@ def legal_action_mask(
     flat = flatten_observation(observations)
     mask = flat >= 0
     if valid_cells_mask is not None:
-        mask = mask & valid_cells_mask.to(device=mask.device)
+        if valid_cells_mask.device != mask.device:
+            valid_cells_mask = valid_cells_mask.to(device=mask.device)
+        mask = mask & valid_cells_mask
     return mask
 
 
@@ -51,15 +53,11 @@ def apply_legal_mask(
     valid_cells_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
     mask = legal_action_mask(observations, valid_cells_mask).to(device=logits.device)
+    return apply_mask_to_logits(logits, mask)
+
+
+def apply_mask_to_logits(logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     if mask.shape != logits.shape:
         raise ValueError(f"mask shape {tuple(mask.shape)} does not match logits {tuple(logits.shape)}")
     floor = torch.finfo(logits.dtype).min
     return logits.masked_fill(~mask, floor)
-
-
-def masked_categorical(
-    logits: torch.Tensor,
-    observations: torch.Tensor,
-    valid_cells_mask: torch.Tensor | None = None,
-) -> torch.distributions.Categorical:
-    return torch.distributions.Categorical(logits=apply_legal_mask(logits, observations, valid_cells_mask))

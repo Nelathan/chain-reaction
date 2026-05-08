@@ -12,7 +12,7 @@ import torch
 from torch import nn
 
 from training.torch_ppo.gae import compute_negamax_gae
-from training.torch_ppo.masking import compute_cells_mask, masked_categorical
+from training.torch_ppo.masking import apply_mask_to_logits, compute_cells_mask, legal_action_mask
 from training.torch_ppo.model import ChainReactionNet
 from training.torch_ppo.puffer_vec import PufferVec
 from training.torch_ppo.evaluate_checkpoint import (
@@ -23,7 +23,8 @@ from training.torch_ppo.evaluate_checkpoint import (
 )
 
 
-BOARD_SIZE = 8  # fixed compile-time constant; all models are 8×8 CNN
+DEFAULT_BOARD_SIZE = 8
+COMPILE_MIN_UPDATES = 100
 
 # per-size max_turns caps from random-vs-random probes
 SIZE_CAPS = {3: 16, 4: 32, 5: 64, 6: 80, 7: 104, 8: 136}
@@ -31,12 +32,14 @@ SIZE_CAPS = {3: 16, 4: 32, 5: 64, 6: 80, 7: 104, 8: 136}
 
 @dataclass
 class TrainConfig:
+    board_size: int = DEFAULT_BOARD_SIZE
     total_timesteps: int = 32_000_000
     total_agents: int = 1024
     horizon: int = 32
-    minibatch_size: int = 8192
-    update_epochs: int = 2
+    minibatch_size: int = 32768
+    update_epochs: int = 1
     learning_rate: float = 3e-4
+    weight_decay: float = 0.0
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_coef: float = 0.2
@@ -61,34 +64,10 @@ class TrainConfig:
     log_interval: int = 25
     eval_interval: int = 100
     eval_games: int = 32
-    sweep_interval: int = 500
-    sweep_games: int = 64
-    unlock_interval: int = 100
-    compile_model: int = 1
+    compile_model: int = -1
     compile_mode: str = "default"
     sync_gpu_step: int = 0
-
-
-class CurriculumScheduler:
-    """Round-robin batch scheduler. Unlocks sizes at step thresholds, then cycles."""
-
-    SIZES = [4, 5, 6, 7, 8]
-
-    def __init__(self, unlock_interval: int = 100):
-        self.unlock_interval = unlock_interval
-
-    def get_size(self, update: int) -> int:
-        """Return the board size to use for this update."""
-        n = min(len(self.SIZES), update // self.unlock_interval + 1)
-        return self.SIZES[update % n]
-
-    def unlocked_sizes(self, update: int) -> list[int]:
-        return self.SIZES[: min(len(self.SIZES), update // self.unlock_interval + 1)]
-
-    def newly_unlocked(self, update: int) -> list[int]:
-        prev = self.unlocked_sizes(update - 1) if update > 0 else []
-        curr = self.unlocked_sizes(update)
-        return [s for s in curr if s not in prev]
+    sync_timing: int = 0
 
 
 def parse_args() -> TrainConfig:
@@ -103,7 +82,7 @@ def parse_args() -> TrainConfig:
     return TrainConfig(**vars(ns))
 
 
-def load_puffer_args(config: TrainConfig, active_size: int) -> dict:
+def load_puffer_args(config: TrainConfig) -> dict:
     import pufferlib.pufferl
 
     argv = sys.argv
@@ -114,24 +93,27 @@ def load_puffer_args(config: TrainConfig, active_size: int) -> dict:
         sys.argv = argv
     args["vec"]["total_agents"] = config.total_agents
     args["vec"]["num_buffers"] = 1
-    args["env"]["max_turns"] = SIZE_CAPS.get(active_size, 128)
-    args["env"]["active_width"] = active_size
-    args["env"]["active_height"] = active_size
+    args["env"]["max_turns"] = SIZE_CAPS.get(config.board_size, 128)
+    args["env"]["active_width"] = config.board_size
+    args["env"]["active_height"] = config.board_size
     args["train"]["horizon"] = config.horizon
     args["train"]["minibatch_size"] = config.minibatch_size
     args["train"]["total_timesteps"] = config.total_timesteps
     return args
 
 
-def create_vec(active_size: int, config: TrainConfig, sync_gpu: bool) -> PufferVec:
-    return PufferVec(load_puffer_args(config, active_size), sync_gpu_step=sync_gpu)
+def create_vec(config: TrainConfig, sync_gpu: bool) -> PufferVec:
+    return PufferVec(load_puffer_args(config), sync_gpu_step=sync_gpu)
 
 
 def evaluate_policy(model: nn.Module, obs: torch.Tensor, valid_cells_mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     logits, values = model(obs)
-    dist = masked_categorical(logits, obs, valid_cells_mask)
-    actions = dist.sample()
-    logprobs = dist.log_prob(actions)
+    legal_mask = legal_action_mask(obs, valid_cells_mask)
+    masked_logits = apply_mask_to_logits(logits, legal_mask)
+    probs = torch.softmax(masked_logits, dim=1)
+    actions = torch.multinomial(probs, 1).squeeze(1)
+    selected_probs = probs.gather(1, actions.unsqueeze(1)).squeeze(1)
+    logprobs = selected_probs.clamp_min(torch.finfo(selected_probs.dtype).tiny).log()
     return actions, logprobs, values
 
 
@@ -150,12 +132,19 @@ class IntervalAverager:
     def __init__(self) -> None:
         self.totals: dict[str, float] = {}
         self.counts: dict[str, int] = {}
-        self.tensors: dict[str, list[torch.Tensor]] = {}
+        self.tensor_totals: dict[str, torch.Tensor] = {}
+        self.tensor_counts: dict[str, int] = {}
 
     def add(self, values: dict[str, float | int | torch.Tensor]) -> None:
         for key, value in values.items():
             if isinstance(value, torch.Tensor):
-                self.tensors.setdefault(key, []).append(value.detach())
+                detached = value.detach()
+                if key in self.tensor_totals:
+                    self.tensor_totals[key] = self.tensor_totals[key] + detached
+                    self.tensor_counts[key] += 1
+                else:
+                    self.tensor_totals[key] = detached
+                    self.tensor_counts[key] = 1
             elif isinstance(value, (float, int)):
                 self.totals[key] = self.totals.get(key, 0.0) + float(value)
                 self.counts[key] = self.counts.get(key, 0) + 1
@@ -165,11 +154,12 @@ class IntervalAverager:
             key: self.totals[key] / max(self.counts.get(key, 0), 1)
             for key in self.totals
         }
-        for key, values in self.tensors.items():
-            averaged[key] = float(torch.stack(values).mean().item())
+        for key, value in self.tensor_totals.items():
+            averaged[key] = float((value / max(self.tensor_counts.get(key, 0), 1)).item())
         self.totals.clear()
         self.counts.clear()
-        self.tensors.clear()
+        self.tensor_totals.clear()
+        self.tensor_counts.clear()
         return averaged
 
 
@@ -199,20 +189,32 @@ def init_wandb(config: TrainConfig, run_id: str):
     )
 
 
+def should_compile_model(config: TrainConfig) -> bool:
+    if config.compile_model < 0:
+        planned_updates = max(config.total_timesteps // max(config.total_agents * config.horizon, 1), 1)
+        return planned_updates >= COMPILE_MIN_UPDATES
+    return config.compile_model != 0
+
+
 def maybe_compile_model(model: nn.Module, config: TrainConfig) -> nn.Module:
-    if config.compile_model == 0:
+    if not should_compile_model(config):
         return model
     if not hasattr(torch, "compile"):
         raise RuntimeError("CHAIN_REACTION_COMPILE_MODEL=1 requires torch.compile")
     return torch.compile(model, mode=config.compile_mode)
 
 
-def validate_env_shape(vec: PufferVec) -> None:
-    expected_cells = BOARD_SIZE * BOARD_SIZE
+def sync_for_timing(device: torch.device, enabled: bool) -> None:
+    if enabled and device.type == "cuda":
+        torch.cuda.synchronize()
+
+
+def validate_env_shape(vec: PufferVec, board_size: int) -> None:
+    expected_cells = board_size * board_size
     if vec.obs_size != expected_cells:
         raise RuntimeError(
             f"env obs_size {vec.obs_size} does not match board_size "
-            f"{BOARD_SIZE} ({expected_cells} cells); rebuild the Ocean env "
+            f"{board_size} ({expected_cells} cells); rebuild the Ocean env "
             "with matching CR_WIDTH/CR_HEIGHT"
         )
 
@@ -230,32 +232,29 @@ def load_init_checkpoint(model: nn.Module, optimizer: torch.optim.Optimizer | No
     if optimizer is not None and "optimizer" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer"])
     checkpoint_config = checkpoint.get("config", {})
-    source_active_w = checkpoint_config.get("active_width", BOARD_SIZE)
-    source_active_h = checkpoint_config.get("active_height", BOARD_SIZE)
     return {
         "source_checkpoint": checkpoint_path,
-        "source_active_width": source_active_w,
-        "source_active_height": source_active_h,
+        "source_board_size": checkpoint_config.get("board_size", config.board_size),
     }
 
 
 def run_eval(
     model: nn.Module,
-    active_size: int,
+    board_size: int,
     config: TrainConfig,
     update: int,
     n_games: int,
 ) -> dict[str, float | int | None]:
     eval_agents = min(config.total_agents, 256)
-    max_turns = SIZE_CAPS.get(active_size, 128)
-    mask = compute_cells_mask(BOARD_SIZE, active_size, active_size)
+    max_turns = SIZE_CAPS.get(board_size, 128)
+    mask = compute_cells_mask(board_size, board_size, board_size)
     eval_args = Namespace(
         total_agents=eval_agents,
         max_turns=max_turns,
         seed=config.seed + update * 1000003,
-        board_size=BOARD_SIZE,
-        active_width=active_size,
-        active_height=active_size,
+        board_size=board_size,
+        active_width=board_size,
+        active_height=board_size,
         temperature=0.0,
         checkpoint_player="both",
         sync_gpu_step=config.sync_gpu_step,
@@ -270,7 +269,6 @@ def run_eval(
     total_illegal = p1["illegal_moves"] + p2["illegal_moves"]
     lengths = p1["episode_lengths"] + p2["episode_lengths"]
     return {
-        "active_size": active_size,
         "games": total_games,
         "combined_winrate": total_wins / total_games if total_games else None,
         "p1_winrate": p1["winrate"],
@@ -296,48 +294,62 @@ def ppo_update(
     valid_cells_mask: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
     batch_size = observations.shape[0]
-    indices = torch.arange(batch_size, device=observations.device)
-    loss_tensors = {"policy": [], "value": [], "entropy": [], "approx_kl": []}
+    loss_tensors = {
+        "policy": torch.zeros((), device=observations.device),
+        "value": torch.zeros((), device=observations.device),
+        "entropy": torch.zeros((), device=observations.device),
+        "approx_kl": torch.zeros((), device=observations.device),
+    }
     steps = 0
 
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     for _epoch in range(config.update_epochs):
-        permutation = indices[torch.randperm(batch_size, device=observations.device)]
+        permutation = torch.randperm(batch_size, device=observations.device)
+        shuffled_observations = observations[permutation]
+        shuffled_actions = actions[permutation]
+        shuffled_old_logprobs = old_logprobs[permutation]
+        shuffled_advantages = advantages[permutation]
+        shuffled_returns = returns[permutation]
         for start in range(0, batch_size, config.minibatch_size):
-            mb = permutation[start:start + config.minibatch_size]
-            logits, new_values = model(observations[mb])
-            dist = masked_categorical(logits, observations[mb], valid_cells_mask)
-            new_logprobs = dist.log_prob(actions[mb])
-            entropy = dist.entropy().mean()
+            stop = start + config.minibatch_size
+            mb_observations = shuffled_observations[start:stop]
+            mb_actions = shuffled_actions[start:stop]
+            mb_old_logprobs = shuffled_old_logprobs[start:stop]
+            mb_advantages = shuffled_advantages[start:stop]
+            mb_returns = shuffled_returns[start:stop]
 
-            logratio = new_logprobs - old_logprobs[mb]
+            logits, new_values = model(mb_observations)
+            mb_legal_masks = legal_action_mask(mb_observations, valid_cells_mask)
+            masked_logits = apply_mask_to_logits(logits, mb_legal_masks)
+            log_probs = torch.log_softmax(masked_logits, dim=1)
+            new_logprobs = log_probs.gather(1, mb_actions.unsqueeze(1)).squeeze(1)
+            entropy = -(log_probs.exp() * log_probs).sum(dim=1).mean()
+
+            logratio = new_logprobs - mb_old_logprobs
             ratio = logratio.exp()
-            pg_loss_unclipped = -advantages[mb] * ratio
-            pg_loss_clipped = -advantages[mb] * torch.clamp(ratio, 1.0 - config.clip_coef, 1.0 + config.clip_coef)
+            pg_loss_unclipped = -mb_advantages * ratio
+            pg_loss_clipped = -mb_advantages * torch.clamp(ratio, 1.0 - config.clip_coef, 1.0 + config.clip_coef)
             policy_loss = torch.max(pg_loss_unclipped, pg_loss_clipped).mean()
-            value_loss = 0.5 * (new_values - returns[mb]).pow(2).mean()
+            value_loss = 0.5 * (new_values - mb_returns).pow(2).mean()
             loss = policy_loss + config.vf_coef * value_loss - config.ent_coef * entropy
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
+            nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm, foreach=True)
             optimizer.step()
 
             with torch.no_grad():
                 approx_kl = ((ratio - 1.0) - logratio).mean()
-            loss_tensors["policy"].append(policy_loss.detach())
-            loss_tensors["value"].append(value_loss.detach())
-            loss_tensors["entropy"].append(entropy.detach())
-            loss_tensors["approx_kl"].append(approx_kl.detach())
+            loss_tensors["policy"] += policy_loss.detach()
+            loss_tensors["value"] += value_loss.detach()
+            loss_tensors["entropy"] += entropy.detach()
+            loss_tensors["approx_kl"] += approx_kl.detach()
             steps += 1
 
     if steps == 0:
         return {key: torch.zeros((), device=observations.device) for key in loss_tensors}
-    return {
-        key: torch.stack(values).mean()
-        for key, values in loss_tensors.items()
-    }
+    return {key: value / steps for key, value in loss_tensors.items()}
 
 
 def main() -> None:
@@ -349,17 +361,21 @@ def main() -> None:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
 
-    scheduler = CurriculumScheduler(unlock_interval=config.unlock_interval)
-
     sync_gpu = bool(config.sync_gpu_step)
-    active_size = scheduler.get_size(0)
-    vec = create_vec(active_size, config, sync_gpu)
-    validate_env_shape(vec)
+    sync_timing = bool(config.sync_timing)
+    compile_enabled = should_compile_model(config)
+    vec = create_vec(config, sync_gpu)
+    validate_env_shape(vec, config.board_size)
     device = vec.device
-    valid_cells_mask = compute_cells_mask(BOARD_SIZE, active_size, active_size).to(device)
+    valid_cells_mask = compute_cells_mask(config.board_size, config.board_size, config.board_size).to(device)
 
-    checkpoint_model = ChainReactionNet(board_size=BOARD_SIZE).to(device)
-    optimizer = torch.optim.AdamW(checkpoint_model.parameters(), lr=config.learning_rate)
+    checkpoint_model = ChainReactionNet(board_size=config.board_size).to(device)
+    optimizer = torch.optim.AdamW(
+        checkpoint_model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+        fused=(device.type == "cuda"),
+    )
     transfer_meta = load_init_checkpoint(checkpoint_model, optimizer, config)
     model = maybe_compile_model(checkpoint_model, config)
 
@@ -375,51 +391,38 @@ def main() -> None:
         " ".join(
             [
                 f"run_id={run_id}",
-                f"board_size={BOARD_SIZE}",
-                f"active={active_size}x{active_size}",
+                f"board_size={config.board_size}",
                 f"total_agents={config.total_agents}",
                 f"horizon={config.horizon}",
                 f"minibatch_size={config.minibatch_size}",
                 f"total_timesteps={config.total_timesteps}",
-                f"unlock_interval={config.unlock_interval}",
                 f"eval_interval={config.eval_interval}",
-                f"sweep_interval={config.sweep_interval}",
-                f"compile_model={config.compile_model}",
+                f"compile_enabled={compile_enabled}",
+                f"sync_timing={sync_timing}",
                 f"device={device}",
             ]
         ),
         flush=True,
     )
 
-    obs_buf = torch.zeros(config.horizon, vec.total_agents, vec.obs_size, device=device)
-    action_buf = torch.zeros(config.horizon, vec.total_agents, dtype=torch.long, device=device)
-    logprob_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
-    value_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
-    reward_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
-    terminal_buf = torch.zeros(config.horizon, vec.total_agents, device=device)
-    illegal_mask = torch.zeros(config.horizon, vec.total_agents, dtype=torch.bool, device=device)
+    obs_buf = torch.empty(
+        config.horizon, vec.total_agents, vec.obs_size,
+        dtype=vec.observations.dtype,
+        device=device,
+    )
+    action_buf = torch.empty(config.horizon, vec.total_agents, dtype=torch.long, device=device)
+    logprob_buf = torch.empty(config.horizon, vec.total_agents, device=device)
+    value_buf = torch.empty(config.horizon, vec.total_agents, device=device)
+    reward_buf = torch.empty(config.horizon, vec.total_agents, device=device)
+    terminal_buf = torch.empty(config.horizon, vec.total_agents, device=device)
 
     try:
         while global_step < config.total_timesteps:
-            # --- size selection and env switching ---
-            new_size = scheduler.get_size(update)
-            new_unlocked = scheduler.newly_unlocked(update)
-            for s in new_unlocked:
-                print(f"unlocked {s}x{s} at update {update}", flush=True)
-
-            if new_size != active_size:
-                prev = active_size
-                vec.close()
-                vec = create_vec(new_size, config, sync_gpu)
-                validate_env_shape(vec)
-                device = vec.device
-                valid_cells_mask = compute_cells_mask(BOARD_SIZE, new_size, new_size).to(device)
-                active_size = new_size
-
             # --- rollout ---
+            sync_for_timing(device, sync_timing)
             rollout_start = time.perf_counter()
             for t in range(config.horizon):
-                obs = vec.observations.float()
+                obs = vec.observations
                 with torch.no_grad():
                     actions, logprobs, values = evaluate_policy(model, obs, valid_cells_mask)
                 obs_buf[t] = obs
@@ -427,22 +430,23 @@ def main() -> None:
                 logprob_buf[t] = logprobs
                 value_buf[t] = values
 
-                illegal_mask[t] = (obs.gather(1, actions.unsqueeze(1)).squeeze(1) < 0) | (~valid_cells_mask[actions])
                 vec.step(actions)
                 reward_buf[t] = vec.rewards
                 terminal_buf[t] = vec.terminals
 
-            illegal_selected = illegal_mask.sum()
+            illegal_selected = (obs_buf.gather(2, action_buf.unsqueeze(-1)).squeeze(-1) < 0).sum()
+            sync_for_timing(device, sync_timing)
             rollout_elapsed = time.perf_counter() - rollout_start
 
             with torch.no_grad():
-                _, last_values = model(vec.observations.float())
+                _, last_values = model(vec.observations)
                 advantages, returns = compute_negamax_gae(
                     reward_buf, value_buf, terminal_buf, last_values,
                     config.gamma, config.gae_lambda,
                 )
 
             # --- PPO update ---
+            sync_for_timing(device, sync_timing)
             update_start = time.perf_counter()
             flat_obs = obs_buf.reshape(-1, vec.obs_size)
             flat_actions = action_buf.reshape(-1)
@@ -453,6 +457,7 @@ def main() -> None:
                 model, optimizer, flat_obs, flat_actions, flat_logprobs,
                 flat_advantages, flat_returns, config, valid_cells_mask,
             )
+            sync_for_timing(device, sync_timing)
             update_elapsed = time.perf_counter() - update_start
 
             update += 1
@@ -478,12 +483,11 @@ def main() -> None:
                 averaged["agent_steps"] = global_step
                 averaged["uptime"] = elapsed
                 averaged["SPS"] = global_step / max(elapsed, 1e-6)
-                averaged["active_size"] = active_size
                 print(
                     " ".join(
                         [
                             f"update={update}",
-                            f"size={active_size}",
+                            f"board_size={config.board_size}",
                             f"agent_steps={global_step}",
                             f"SPS={averaged['SPS']:.0f}",
                             f"rollout_ms={averaged.get('rollout_ms', 0):.0f}",
@@ -494,20 +498,26 @@ def main() -> None:
                             f"entropy={averaged.get('loss/entropy')}",
                             f"approx_kl={averaged.get('loss/approx_kl')}",
                         ]
-                    ),
+                ),
                     flush=True,
                 )
+                logs.append(dict(averaged))
 
-            # --- periodic eval: largest unlocked size ---
+            # --- periodic eval ---
             if update % config.eval_interval == 0 or global_step >= config.total_timesteps:
-                eval_size = scheduler.unlocked_sizes(update)[-1]
                 with torch.no_grad():
-                    result = run_eval(checkpoint_model, eval_size, config, update, config.eval_games)
+                    result = run_eval(
+                        checkpoint_model,
+                        config.board_size,
+                        config,
+                        update,
+                        config.eval_games,
+                    )
                 print(
                     " ".join(
                         [
                             f"eval_update={update}",
-                            f"size={eval_size}",
+                            f"board_size={config.board_size}",
                             f"games={result['games']}",
                             f"combined_winrate={result['combined_winrate']}",
                             f"wilson_lower_bound={result['wilson_lower_bound']}",
@@ -521,28 +531,6 @@ def main() -> None:
                 if wandb_run is not None:
                     wandb_run.log({f"eval/{k}": v for k, v in result.items() if isinstance(v, (float, int))}, step=global_step)
 
-            # --- sweep eval: all unlocked sizes ---
-            if update % config.sweep_interval == 0:
-                sweep_sizes = scheduler.unlocked_sizes(update)
-                print(f"sweep_eval_update={update} sizes={sweep_sizes}", flush=True)
-                for sz in sweep_sizes:
-                    with torch.no_grad():
-                        result = run_eval(checkpoint_model, sz, config, update, config.sweep_games)
-                    print(
-                        " ".join(
-                            [
-                                f"sweep_eval size={sz}",
-                                f"games={result['games']}",
-                                f"combined_winrate={result['combined_winrate']}",
-                                f"wilson_lower_bound={result['wilson_lower_bound']}",
-                                f"truncations={result['truncations']}",
-                            ]
-                        ),
-                        flush=True,
-                    )
-                    if wandb_run is not None:
-                        wandb_run.log({f"sweep/{sz}/{k}": v for k, v in result.items() if isinstance(v, (float, int))}, step=global_step)
-
             if wandb_run is not None and should_log:
                 wandb_run.log(averaged, step=global_step)
 
@@ -554,38 +542,15 @@ def main() -> None:
                     "optimizer": optimizer.state_dict(),
                     "config": asdict(config),
                     "step": global_step,
-                    "board_size": BOARD_SIZE,
-                    "active_width": active_size,
-                    "active_height": active_size,
+                    "board_size": config.board_size,
+                    "compile_enabled": compile_enabled,
                 }
                 if transfer_meta is not None:
                     checkpoint_payload.update({
                         "transfer_source_checkpoint": transfer_meta["source_checkpoint"],
-                        "transfer_source_active_width": transfer_meta["source_active_width"],
-                        "transfer_source_active_height": transfer_meta["source_active_height"],
+                        "transfer_source_board_size": transfer_meta["source_board_size"],
                     })
                 torch.save(checkpoint_payload, path)
-
-        # --- final sweep eval ---
-        print("final sweep eval", flush=True)
-        all_sizes = CurriculumScheduler.SIZES
-        for sz in all_sizes:
-            with torch.no_grad():
-                result = run_eval(checkpoint_model, sz, config, update, config.sweep_games)
-            print(
-                " ".join(
-                    [
-                        f"final_eval size={sz}",
-                        f"games={result['games']}",
-                        f"combined_winrate={result['combined_winrate']}",
-                        f"wilson_lower_bound={result['wilson_lower_bound']}",
-                        f"truncations={result['truncations']}",
-                    ]
-                ),
-                flush=True,
-            )
-            if wandb_run is not None:
-                wandb_run.log({f"final/{sz}/{k}": v for k, v in result.items() if isinstance(v, (float, int))}, step=global_step)
 
         with open(os.path.join(config.log_dir, run_id + ".json"), "w") as f:
             json.dump({"config": asdict(config), "logs": logs}, f)

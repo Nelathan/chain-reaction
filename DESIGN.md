@@ -137,41 +137,25 @@ Training starts from scratch. No human data, supervised fine-tuning, GANs, or th
 - **Container artifact boundary:** Compose plus bind mounts is the development contract because it guarantees the image builds the current working tree and submodule checkout. A derived Dockerfile from `pufferai/puffertank:4.0` is appropriate for CI or release freezing, but it must not replace the edit/review loop until native semantics are stable; copied source layers are too easy to make stale during CUDA patch review.
 - **Next product loop:** prove one minimal end-to-end training run before polishing presentation. After the first checkpoint can be trained, saved, and loaded, build a cheap CLI/TUI replay/debug viewer before Godot so policy behavior, legal masks, rewards, terminal states, and cascade depths are inspectable without renderer ceremony.
 
-## Board-Size Curriculum
+## Board-Size Transfer
 
-The repo-owned Torch CNN treats board size as a run parameter, not as model identity. The trunk is fully convolutional, the policy head emits one logit per cell through a `1x1` projection, and the value head uses global pooling.
+The repo-owned Torch CNN treats board size as a run parameter, not model identity. The trunk is fully convolutional, the policy head emits one logit per cell through a `1x1` projection, and the value head uses global pooling.
 
-The current curriculum is a single round-robin session over `4x4` through `8x8`, driven by `train.py` / `training/torch_ppo/curriculum.sh`. One Ocean binary, one optimizer, one process. No size-specific restarts, no eval gating, no compile-time board-size churn.
+The board uses a fixed compile-time width and height for each run. Runtime geometry is the board geometry.
 
-Current verdict: this curriculum does not presently generalize cleanly. The 32M round-robin model is not a drop-in substitute for size-specific training; it loses badly to the scratch 8×8 checkpoint and shows seat asymmetry on 7×7. That could still be a representation bug, a transfer bug, or a training bug, but the present implementation should be treated as a negative result, not a default recipe.
+Checkpoint metadata must record source board size for provenance, reproducibility, and accidental-mismatch detection. Reports should include both source checkpoint board size and target board size when evaluating transfer.
 
-Practical rule: train a fresh model per board size for now. Keep curriculum as an experiment, not the assumed path to strength.
-
-Checkpoint metadata must still record source board size for provenance, reproducibility, and accidental-mismatch detection. Reports should include both source checkpoint board size and target board size when evaluating transfer.
+For now, train a fresh model per board size. Treat transfer as an experiment, not the default path.
 
 Use these rollout rules of record:
 
-- `horizon` defaults to `32` for curriculum runs to keep the rollout-to-update ratio practical at 1024 agents.
+- `horizon` defaults to `32`.
 - `max_turns` is size-specific and chosen from measured episode lengths. `horizon` chunks PPO updates; truncation prevents runaway games.
 - Eval against random legal play is now a sanity check, not the discriminating benchmark. Self-play is the next honest metric.
 
-### Round-Robin Curriculum (verified 2026-05-07)
+The useful unanswered question is whether native `6x6` training matches a same-settings `8x8` run.
 
-```text
-sizes: 4x4, 5x5, 6x6, 7x7, 8x8
-unlock interval: 100 updates
-schedule: one PPO update per size, then rotate
-eval: every 100 updates on the largest unlocked size
-sweep eval: every 500 updates across all unlocked sizes
-```
-
-The fixed 8x8 compile target stays in place. Runtime `active_width` / `active_height` select the playable region, and the valid-cell mask keeps inactive cells out of legality, cascade resolution, and alive-player detection.
-
-### Measured Curriculum Results
-
-The 32M-impression round-robin run reached 100% winrate against random legal play on all sizes `4x4`–`8x8`, with zero illegal actions and zero truncations. That is a floor, not a ceiling. More importantly, the same model then lost the self-play matchup against the scratch 8×8 checkpoint and showed uneven seat performance on 7×7, so the curriculum result is not strength evidence.
-
-The first useful follow-up is to train dedicated models per size and compare them against curriculum transfer as an experiment. A useful future question is whether `8x8` training with `active_size=6` is equivalent to native `6x6` training.
+Small-model note: the smaller checkpoint is not random-noise—it beats random legal play—but it still loses the size-matched head-to-head, which says it has learned the rules surface without yet carrying enough board-size-specific tactics.
 
 The PPO update remains the bottleneck, not rollout. If training speed becomes the blocker for ablations, the next target is update-loop fusion, not gameplay refactoring.
 
@@ -181,8 +165,8 @@ Native PufferLib model work is paused as the primary route. The repo-owned Torch
 
 The next learning milestone is now:
 
-1. Evaluate the current curriculum checkpoint against the scratch 8x8 model.
-2. Compare incremental-unlock curriculum against flat round-robin with the same budget.
+1. Evaluate a size-specific checkpoint against the scratch 8x8 model.
+2. Compare native `6x6` training against a same-settings `8x8` run.
 3. Decide the AdamW weight decay and LR schedule explicitly.
 4. Add telemetry so the ablations are inspectable instead of vibes-based.
 5. Only then revisit native acceleration, Triton fusion, or a PufferLib extension seam.

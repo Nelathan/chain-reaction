@@ -85,6 +85,8 @@ podman compose -f compose.yaml -f compose.podman.yaml run --rm puffer \
 
 `python -m pufferlib.pufferl eval chain_reaction --render-mode None` is not a strength evaluator. It loads weights, then enters an open-ended render/rollout loop even with rendering disabled.
 
+For model-vs-model evaluation, run the evaluator inside PufferTank with the repo mounted at `/puffertank/pufferlib` and `PYTHONPATH=/puffertank/pufferlib:/puffertank/pufferlib/vendor/PufferLib`, then call `training/torch_ppo/evaluate_checkpoint.py --opponent-checkpoint ...`.
+
 ## Current training reality
 
 The intended model is the small spatial CNN described in `DESIGN.md` and implemented in the repo Torch path. The current native PufferLib path is faster but currently trains PufferLib's default linear encoder + MinGRU + linear decoder. Runtime logs print this explicitly; trust the logs.

@@ -26,7 +26,7 @@ def sample_random_legal(observations: torch.Tensor, generator: torch.Generator, 
     return torch.multinomial(weights, 1, generator=generator).squeeze(1)
 
 
-def load_puffer_args(total_agents: int, max_turns: int, seed: int, active_width: int = 8, active_height: int = 8) -> dict:
+def load_puffer_args(total_agents: int, max_turns: int, seed: int, board_size: int = 8) -> dict:
     import pufferlib.pufferl
 
     argv = sys.argv
@@ -38,8 +38,8 @@ def load_puffer_args(total_agents: int, max_turns: int, seed: int, active_width:
     args["vec"]["total_agents"] = total_agents
     args["vec"]["num_buffers"] = 1
     args["env"]["max_turns"] = max_turns
-    args["env"]["active_width"] = active_width
-    args["env"]["active_height"] = active_height
+    args["env"]["active_width"] = board_size
+    args["env"]["active_height"] = board_size
     args["train"]["horizon"] = 1
     args["train"]["minibatch_size"] = max(1, total_agents)
     args["seed"] = seed
@@ -63,8 +63,6 @@ def percentile(values: list[int], q: float) -> float | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Probe random-vs-random Chain Reaction terminal lengths.")
     parser.add_argument("--board-size", type=int, default=8)
-    parser.add_argument("--active-width", type=int, default=8, help="active region width")
-    parser.add_argument("--active-height", type=int, default=8, help="active region height")
     parser.add_argument("--games", type=int, default=1000)
     parser.add_argument("--total-agents", type=int, default=1024)
     parser.add_argument("--max-turns", type=int, default=4096)
@@ -81,10 +79,7 @@ def main() -> None:
         raise SystemExit("--total-agents must be positive")
 
     started = time.time()
-    vec = PufferVec(
-        load_puffer_args(args.total_agents, args.max_turns, args.seed, args.active_width, args.active_height),
-        sync_gpu_step=bool(args.sync_gpu_step),
-    )
+    vec = PufferVec(load_puffer_args(args.total_agents, args.max_turns, args.seed, args.board_size), sync_gpu_step=bool(args.sync_gpu_step))
     expected_cells = args.board_size * args.board_size
     if vec.obs_size != expected_cells:
         vec.close()
@@ -93,7 +88,7 @@ def main() -> None:
             f"{args.board_size} ({expected_cells} cells)"
         )
 
-    valid_cells_mask = compute_cells_mask(BOARD_SIZE, args.active_width, args.active_height).to(vec.device)
+    valid_cells_mask = compute_cells_mask(args.board_size, args.board_size, args.board_size).to(vec.device)
 
     generator = torch.Generator(device=vec.device)
     generator.manual_seed(args.seed)
@@ -150,8 +145,6 @@ def main() -> None:
 
     report = {
         "board_size": args.board_size,
-        "active_width": args.active_width,
-        "active_height": args.active_height,
         "obs_size": expected_cells,
         "requested_games": args.games,
         "games": min(completed, args.games),

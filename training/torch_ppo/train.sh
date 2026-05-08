@@ -4,8 +4,7 @@ set -euo pipefail
 PUFFER_ROOT="${PUFFER_ROOT:-/puffertank/pufferlib}"
 REPO_ROOT="${CHAIN_REACTION_REPO:-/workspace/chain-reaction}"
 ENV_NAME="chain_reaction"
-ACTIVE_WIDTH="${CHAIN_REACTION_ACTIVE_WIDTH:-8}"
-ACTIVE_HEIGHT="${CHAIN_REACTION_ACTIVE_HEIGHT:-8}"
+BOARD_SIZE="${CHAIN_REACTION_BOARD_SIZE:-8}"
 INIT_CHECKPOINT="${CHAIN_REACTION_INIT_CHECKPOINT:-}"
 
 cd "$PUFFER_ROOT"
@@ -26,9 +25,8 @@ ln -s "$REPO_ROOT/training/puffer_ocean/$ENV_NAME" "ocean/$ENV_NAME"
 ln -s "$REPO_ROOT/training/puffer_ocean/config/$ENV_NAME.ini" "config/$ENV_NAME.ini"
 ln -s "$REPO_ROOT/core" chain_reaction_core
 
-# Always compile at 8x8 (the model's fixed board size). The active region is
-# controlled by active_width/active_height at runtime, not compile-time constants.
-EXTRA_CFLAGS="${EXTRA_CFLAGS:--I$REPO_ROOT}" bash build.sh "$ENV_NAME" ${PUFFER_BUILD_ARGS:-}
+# Compile the Ocean env at the requested board size.
+EXTRA_CFLAGS="${EXTRA_CFLAGS:--I$REPO_ROOT} -DCR_WIDTH=$BOARD_SIZE -DCR_HEIGHT=$BOARD_SIZE" bash build.sh "$ENV_NAME" ${PUFFER_BUILD_ARGS:-}
 
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 args=(
@@ -36,11 +34,36 @@ args=(
     --total-timesteps "${CHAIN_REACTION_TOTAL_TIMESTEPS:-10000000}"
     --total-agents "${CHAIN_REACTION_TOTAL_AGENTS:-1024}"
     --horizon "${CHAIN_REACTION_HORIZON:-128}"
-    --minibatch-size "${CHAIN_REACTION_MINIBATCH_SIZE:-8192}"
+    --minibatch-size "${CHAIN_REACTION_MINIBATCH_SIZE:-32768}"
+    --update-epochs "${CHAIN_REACTION_UPDATE_EPOCHS:-1}"
+    --learning-rate "${CHAIN_REACTION_LEARNING_RATE:-0.0003}"
+    --weight-decay "${CHAIN_REACTION_WEIGHT_DECAY:-0.0}"
+    --gamma "${CHAIN_REACTION_GAMMA:-0.99}"
+    --gae-lambda "${CHAIN_REACTION_GAE_LAMBDA:-0.95}"
+    --clip-coef "${CHAIN_REACTION_CLIP_COEF:-0.2}"
+    --vf-coef "${CHAIN_REACTION_VF_COEF:-0.5}"
+    --ent-coef "${CHAIN_REACTION_ENT_COEF:-0.01}"
+    --max-grad-norm "${CHAIN_REACTION_MAX_GRAD_NORM:-1.0}"
     --max-turns "${CHAIN_REACTION_MAX_TURNS:-128}"
-    --active-width "$ACTIVE_WIDTH"
-    --active-height "$ACTIVE_HEIGHT"
+    --board-size "$BOARD_SIZE"
+    --seed "${CHAIN_REACTION_SEED:-73}"
     --checkpoint-interval "${CHAIN_REACTION_CHECKPOINT_INTERVAL:-20}"
+    --log-interval "${CHAIN_REACTION_LOG_INTERVAL:-25}"
+    --eval-interval "${CHAIN_REACTION_EVAL_INTERVAL:-100}"
+    --eval-games "${CHAIN_REACTION_EVAL_GAMES:-32}"
+    --compile-model "${CHAIN_REACTION_COMPILE_MODEL:--1}"
+    --compile-mode "${CHAIN_REACTION_COMPILE_MODE:-default}"
+    --sync-gpu-step "${CHAIN_REACTION_SYNC_GPU_STEP:-0}"
+    --sync-timing "${CHAIN_REACTION_SYNC_TIMING:-0}"
+    --wandb "${CHAIN_REACTION_WANDB:-0}"
+    --wandb-project "${CHAIN_REACTION_WANDB_PROJECT:-chain-reaction}"
+    --wandb-group "${CHAIN_REACTION_WANDB_GROUP:-torch-ppo}"
+    --wandb-entity "${CHAIN_REACTION_WANDB_ENTITY:-}"
+    --wandb-name "${CHAIN_REACTION_WANDB_NAME:-}"
+    --wandb-tags "${CHAIN_REACTION_WANDB_TAGS:-}"
+    --wandb-mode "${CHAIN_REACTION_WANDB_MODE:-}"
+    --wandb-base-url "${CHAIN_REACTION_WANDB_BASE_URL:-}"
+    --wandb-silent "${CHAIN_REACTION_WANDB_SILENT:-1}"
     --checkpoint-dir "$REPO_ROOT/training/checkpoints/torch_ppo"
     --log-dir "$REPO_ROOT/training/logs/torch_ppo"
 )

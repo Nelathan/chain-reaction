@@ -35,8 +35,6 @@ def evaluate_size(
     checkpoint_path: Path,
     checkpoint_board_size: int,
     board_size: int,
-    active_width: int,
-    active_height: int,
     games: int,
     total_agents: int,
     max_turns: int,
@@ -50,8 +48,6 @@ def evaluate_size(
         games=games,
         total_agents=total_agents,
         board_size=board_size,
-        active_width=active_width,
-        active_height=active_height,
         max_turns=max_turns,
         temperature=temperature,
         checkpoint_player=checkpoint_player,
@@ -62,7 +58,7 @@ def evaluate_size(
     model = ChainReactionNet(board_size=board_size)
     model.load_state_dict(checkpoint["model"])
 
-    device_probe = PufferVec(load_puffer_args(1, max_turns, seed, active_width, active_height), sync_gpu_step=bool(sync_gpu_step))
+    device_probe = PufferVec(load_puffer_args(1, max_turns, seed, board_size), sync_gpu_step=bool(sync_gpu_step))
     device = device_probe.device
     if device_probe.obs_size != board_size * board_size:
         actual = device_probe.obs_size
@@ -70,7 +66,7 @@ def evaluate_size(
         raise SystemExit(f"env obs_size {actual} does not match board_size {board_size}")
     device_probe.close()
     model = model.to(device).eval()
-    valid_cells_mask = compute_cells_mask(EVAL_BOARD_SIZE, active_width, active_height).to(device)
+    valid_cells_mask = compute_cells_mask(EVAL_BOARD_SIZE, board_size, board_size).to(device)
 
     p1_games, p2_games = split_games(games, checkpoint_player)
     p1 = run_seat(args, model, 1, p1_games, valid_cells_mask=valid_cells_mask)
@@ -152,8 +148,6 @@ def main() -> None:
             checkpoint_path=args.checkpoint,
             checkpoint_board_size=checkpoint_board_size,
             board_size=board_size,
-            active_width=board_size,
-            active_height=board_size,
             games=args.games,
             total_agents=args.total_agents,
             max_turns=args.max_turns,

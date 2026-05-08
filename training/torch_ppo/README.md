@@ -16,7 +16,7 @@ The script builds the Ocean environment, then runs `training/torch_ppo/train.py`
 
 To continue from a saved checkpoint on a new board size, set `CHAIN_REACTION_INIT_CHECKPOINT=/path/to/checkpoint.pt`. The model weights load, the optimizer starts fresh, and reports record both source and target board sizes.
 
-For the post-training verdict across curriculum sizes `3x3` through `8x8`, use `training/torch_ppo/final_eval.py`.
+For a post-training verdict across board sizes, use `training/torch_ppo/final_eval.py`.
 
 To log the repo-owned trainer to Weights & Biases, export `WANDB_API_KEY` on the host and enable the trainer flag through Compose:
 
@@ -35,19 +35,35 @@ Optional pass-throughs are `CHAIN_REACTION_WANDB_ENTITY`, `CHAIN_REACTION_WANDB_
 Useful performance knobs:
 
 - `CHAIN_REACTION_LOG_INTERVAL=10` logs every N PPO updates and averages interval metrics.
+- `CHAIN_REACTION_MINIBATCH_SIZE=32768` is the current safe high-throughput default for the 1024-agent, 128-horizon shape on the development GPU; `65536` OOMed there.
+- `CHAIN_REACTION_UPDATE_EPOCHS=1` is the current fast baseline. It halves PPO update work versus the previous two-epoch default and still passed 4x4/6x6 random-eval sanity runs; treat harder-board quality as an ablation target, not a settled theorem.
 - `CHAIN_REACTION_COMPILE_MODEL=1` enables `torch.compile` for the policy/value model.
 - `CHAIN_REACTION_COMPILE_MODE=default` forwards the compile mode to PyTorch.
 - `CHAIN_REACTION_SYNC_GPU_STEP=0` keeps Puffer GPU stepping asynchronous; set to `1` only when debugging native step ordering.
+- `CHAIN_REACTION_SYNC_TIMING=1` adds CUDA synchronizations around rollout and update timers. Leave it off for training throughput; turn it on when comparing phase timings.
 
 ## Training contract
 
-- Observations are current-player-relative signed distance-to-explosion boards shaped as `(batch, 1, 8, 8)`.
+- Observations are current-player-relative signed distance-to-explosion boards shaped as `(batch, 1, board_size, board_size)` inside the model.
 - Empty cells are `0`.
 - Current-player cells are positive: `critical_mass - tokens`.
 - Opponent cells are negative: `-(critical_mass - tokens)`.
 - Legal actions are exactly cells with observation value `>= 0`.
 - Illegal actions must be masked on logits before constructing the categorical distribution. Do not softmax first and zero probabilities after.
 - `V(s)` means value for the player to move. Since turns alternate, nonterminal bootstrapping uses `-V(s_next)` in GAE.
+
+## Optimizer contract
+
+- The trainer uses `AdamW` with explicit `weight_decay=0.0`.
+- On CUDA, `AdamW` uses the fused path; CPU runs do not.
+- Learning rate stays constant for now; there is no scheduler in the baseline run shape.
+- If we want a scheduler later, it should be added as an experiment with measured impact, not smuggled in by default.
+
+## Compilation contract
+
+- `torch.compile` is auto-enabled only when the run is long enough to amortize compile time.
+- Short smoke runs stay eager.
+- If we override that heuristic, it should be a separate performance experiment with fresh benchmarks.
 
 ## Baseline model
 
@@ -56,10 +72,10 @@ The first model is deliberately tiny and spatial:
 1. `Conv2d(1, 32, kernel_size=3, padding=1)` stem.
 2. Four pre-activation residual blocks at constant 32 channels:
    `GroupNorm(8, 32) -> SiLU -> Conv3x3 -> GroupNorm(8, 32) -> SiLU -> Conv3x3 -> residual add`.
-3. Policy head: `1x1` convolution to one logit per cell, then flatten to 64 logits and apply the legal mask.
+3. Policy head: `1x1` convolution to one logit per cell, then flatten to `board_size²` logits and apply the legal mask.
 4. Value head: `1x1` projection, global average pool, small MLP, scalar output. No `tanh` in the baseline.
 
-The trunk does not stride, pool, or flatten. The board remains an 8x8 board until the policy head emits one score per cell.
+The trunk does not stride, pool, or flatten. The board remains spatial until the policy head emits one score per cell.
 
 ## Why not native Puffer CUDA model work first?
 
