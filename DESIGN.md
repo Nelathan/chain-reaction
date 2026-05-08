@@ -117,7 +117,7 @@ We are optimizing for a one-day development cycle to reach a playable prototype.
 
 - **Visuals:** Godot renders the state array. No shader cleverness until the AI can beat a human.
 - **Training:** the primary model-iteration path is repo-owned PyTorch PPO with the exact tiny CNN described below and, later, history-pool self-play. Native PufferLib remains a fast environment/native-trainer experiment, not the source of truth for architecture iteration. Do not claim native CNN parity unless the runtime model print and code path match this document.
-- **Observation:** one spatial channel is enough for the first cut: signed distance to explosion, `(critical_mass - current_tokens) * owner_sign`, with `owner_sign` measured from the acting player's perspective. The network gets the physics directly instead of wasting capacity memorizing corner and edge geometry.
+- **Observation:** the environment exports signed distance to explosion, `(critical_mass - current_tokens) * owner_sign`, with `owner_sign` measured from the acting player's perspective. The Torch model derives normalized capacity, own-token count, opponent-token count, and signed-closeness-to-critical planes from that observation; gameplay consumers must not duplicate cascade rules.
 - **Fun Factor:** Godot inference uses temperature scaling. Same weights, higher entropy. The goal is adjustable personality: from Terminator to distracted sibling.
 
 ## Reinforcement Learning Strategy
@@ -177,15 +177,15 @@ The native Puffer CNN checkpoint is a reproducible experiment, not the product d
 
 The first model should be microscopic and spatially honest. The point is not to optimize a generic baseline; it is to make the model match the board and remain readable enough to learn from.
 
-Audit correction: this section describes the intended repo Torch CNN, implemented in `training/torch_ppo/model.py`. The native PufferLib path must not be treated as equivalent unless it implements the same 32-channel, four-block, GroupNorm residual trunk with spatial policy/value heads. Runtime logs print the actual native model; trust the logs over stale intent.
+Audit correction: this section describes the intended repo Torch CNN, implemented in `training/torch_ppo/model.py`. The native PufferLib path must not be treated as equivalent unless it implements the same 32-channel, three-block residual trunk with spatial policy/value heads. Runtime logs print the actual native model; trust the logs over stale intent.
 
 The first repo-owned training run should use this baseline unchanged unless it cannot execute. Its job is to prove the full data path, not to be strong. Tune architecture only after rollout collection, legal masking, sign-aware value targets, rewards, checkpointing, and policy inspection are visibly working.
 
-- **Input:** `(Batch, 1, 8, 8)` signed-distance-to-explosion channel.
-- **Stem:** `Conv2d(1, 32, kernel=3, padding=1)`.
-- **Trunk:** four pre-activation residual blocks at constant 32 channels: `GroupNorm(8, 32)` -> `SiLU` -> `Conv2d(32, 32, 3, padding=1)` -> `GroupNorm(8, 32)` -> `SiLU` -> `Conv2d(32, 32, 3, padding=1)` -> add to the stream. No stride, pooling, or dimensionality reduction in the trunk; the board stays an 8x8 board.
-- **Policy head:** `GroupNorm` -> `SiLU` -> `Conv2d(32, 1, kernel=1)` -> flatten the final 8x8 map into 64 action logits. Legal masking happens on logits before the categorical distribution is built, never by zeroing probabilities after softmax.
-- **Critic head:** `GroupNorm` -> `SiLU` -> `Conv2d(32, C_v, kernel=1)` with small `C_v` such as 4 or 8 -> global average pool -> one small MLP -> scalar value. Do not apply `tanh` in the baseline; terminal rewards are bounded, but value targets and bootstrapping should not be saturated by architecture.
+- **Input:** environment observations are signed-distance-to-explosion boards. The Torch model expands this into four spatial planes: normalized capacity, normalized own-token count, normalized opponent-token count, and signed closeness to critical. Count planes are normalized by the global max capacity (`4`), not local cell capacity; the closeness plane maps occupied cells one token from explosion to `±1` and empty cells to `0`.
+- **Stem:** `Conv2d(input_planes, 32, kernel=3, padding=1)` -> `SiLU`.
+- **Trunk:** three simple residual blocks at constant 32 channels: `Conv2d(32, 32, 3, padding=1)` -> `SiLU` -> `Conv2d(32, 32, 3, padding=1)` -> add to the stream. No normalization, stride, pooling, or dimensionality reduction in the trunk; the board stays an 8x8 board.
+- **Policy head:** `Conv2d(32, 1, kernel=1)` -> flatten the final 8x8 map into 64 action logits. Legal masking happens on logits before the categorical distribution is built, never by zeroing probabilities after softmax.
+- **Critic head:** `Conv2d(32, C_v, kernel=1)` with small `C_v` such as 4 or 8 -> `SiLU` -> global average pool -> one small MLP -> scalar value. Do not apply `tanh` in the baseline; terminal rewards are bounded, but value targets and bootstrapping should not be saturated by architecture.
 
 The policy avoids flattening the trunk into an MLP because actions are cells. A per-cell `1x1` projection keeps the action semantics aligned with board locations. The value head may aggregate globally because it predicts the whole position, not a move at one square.
 

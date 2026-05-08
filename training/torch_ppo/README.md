@@ -44,7 +44,7 @@ Useful performance knobs:
 
 ## Training contract
 
-- Observations are current-player-relative signed distance-to-explosion boards shaped as `(batch, 1, board_size, board_size)` inside the model.
+- Environment observations are current-player-relative signed distance-to-explosion boards shaped as `(batch, board_size²)` before the model reshapes them.
 - Empty cells are `0`.
 - Current-player cells are positive: `critical_mass - tokens`.
 - Opponent cells are negative: `-(critical_mass - tokens)`.
@@ -69,9 +69,9 @@ Useful performance knobs:
 
 The first model is deliberately tiny and spatial:
 
-1. `Conv2d(1, 32, kernel_size=3, padding=1)` stem.
-2. Four pre-activation residual blocks at constant 32 channels:
-   `GroupNorm(8, 32) -> SiLU -> Conv3x3 -> GroupNorm(8, 32) -> SiLU -> Conv3x3 -> residual add`.
+1. Geometry-aware input stem: normalized capacity, normalized own-token count, normalized opponent-token count, and signed closeness to critical.
+2. Three simple residual blocks at constant 32 channels:
+   `Conv3x3 -> SiLU -> Conv3x3 -> residual add`.
 3. Policy head: `1x1` convolution to one logit per cell, then flatten to `board_size²` logits and apply the legal mask.
 4. Value head: `1x1` projection, global average pool, small MLP, scalar output. No `tanh` in the baseline.
 
