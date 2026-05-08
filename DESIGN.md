@@ -139,122 +139,55 @@ Training starts from scratch. No human data, supervised fine-tuning, GANs, or th
 
 ## Board-Size Curriculum
 
-The repo-owned Torch CNN treats board size as a run parameter, not as model identity. The trunk is fully convolutional, the policy head emits one logit per cell through a `1x1` projection, and the value head uses global pooling. Those choices are no longer just aesthetic: a 4x4-trained checkpoint transferred cold to 8x8 and beat random legal play by a wide margin.
+The repo-owned Torch CNN treats board size as a run parameter, not as model identity. The trunk is fully convolutional, the policy head emits one logit per cell through a `1x1` projection, and the value head uses global pooling.
 
-Checkpoint metadata must still record the source board size for provenance, reproducibility, and accidental-mismatch detection. But planned evaluation and fine-tuning on a different target board size should be a first-class path, not an exceptional hidden bypass. Reports must include both source checkpoint board size and target board size.
+The current curriculum is a single round-robin session over `4x4` through `8x8`, driven by `train.py` / `training/torch_ppo/curriculum.sh`. One Ocean binary, one optimizer, one process. No size-specific restarts, no eval gating, no compile-time board-size churn.
 
-Each curriculum size gets its own truncation cap and should be checked against random-vs-random episode lengths before learning starts. `max_turns` is therefore per-size, not a global doctrine.
+Current verdict: this curriculum does not presently generalize cleanly. The 32M round-robin model is not a drop-in substitute for size-specific training; it loses badly to the scratch 8×8 checkpoint and shows seat asymmetry on 7×7. That could still be a representation bug, a transfer bug, or a training bug, but the present implementation should be treated as a negative result, not a default recipe.
+
+Practical rule: train a fresh model per board size for now. Keep curriculum as an experiment, not the assumed path to strength.
+
+Checkpoint metadata must still record source board size for provenance, reproducibility, and accidental-mismatch detection. Reports should include both source checkpoint board size and target board size when evaluating transfer.
 
 Use these rollout rules of record:
 
-- `horizon` defaults to `32` for curriculum runs to keep the rollout-to-update ratio practical at 1024 agents. Single-size dedicated training may use `128` for longer trajectories.
-- `max_turns` is size-specific and chosen from measured episode lengths (see per-size caps below). `horizon` and truncation solve different problems: horizon chunks PPO updates per board size; truncation prevents runaway games.
+- `horizon` defaults to `32` for curriculum runs to keep the rollout-to-update ratio practical at 1024 agents.
+- `max_turns` is size-specific and chosen from measured episode lengths. `horizon` chunks PPO updates; truncation prevents runaway games.
+- Eval against random legal play is now a sanity check, not the discriminating benchmark. Self-play is the next honest metric.
 
-### 8x8 Cold Transfer (measured 2026-05-07)
-
-```text
-source checkpoint: training/checkpoints/torch_ppo/1778140129666_0000000010027008.pt  (4x4, 99.8%)
-target board: 8x8
-config: total_agents=1024, horizon=128, minibatch_size=8192, max_turns=128, compile_model=1
-run: 10M impressions, ~42K SPS
-```
-
-Result: **immediate 100% combined win rate** against random legal play from the first interim eval (update 10). Zero illegal selected actions, zero truncations throughout.
-
-This means random-legal-play is now a dead benchmark for transferred models on 8x8. It remains useful as a sanity check and for scratch-training baselines, but it cannot measure strength beyond the 4x4→8x8 transfer floor. The next honest skill test is self-play.
-
-Throughput breakdown per PPO update (128 horizon × 1024 agents = 131K impressions):
-- rollout: ~470ms
-- PPO update loop: ~2340ms
-- total per update: ~2800ms
-
-The PPO update dominates, not the rollout. Speeding up the update loop (Triton kernel fusion, larger minibatches, fewer epochs) is the next optimization target.
-
-Curriculum policy (implemented 2026-05-07, session 3):
-
-- **Round-robin batch scheduler.** `train.py` manages all sizes in one session. No process restarts, no separate stages.
-- **Step-based unlocks.** New sizes join the round-robin at fixed update thresholds (unlock_interval=100 updates). Starting size is 3×3, with 4×4 through 8×8 joining every 100 updates.
-- **One update per size, then rotate.** Each PPO update trains a single board size; the next update picks the next unlocked size in a round-robin cycle.
-- **PufferVec recreation on switch.** The Ocean vec is destroyed and recreated with the new `active_width`/`active_height`. Cost is ~10ms per switch vs ~2800ms PPO update — negligible.
-- **Eval every 100 updates** on the current training size (32 games against random legal play). **Sweep eval every 500 updates** across all unlocked sizes (64 games each).
-- **Final sweep eval** across all sizes 3×3 through 8×8 at the end of training.
-- **Single Ocean compilation** at 8×8, same as the geometry mask approach. No recompile between sizes.
-- **Total budget:** 32M impressions default, ~1000 updates at 1024 agents × 32 horizon. The goal is a model that performs well on all board sizes, not one checkpoint per size.
-
-## Geometry Mask (implemented 2026-05-07)
-
-The board-size curriculum no longer requires recompiling the Ocean environment per size. Instead:
-
-- `CR_WIDTH=8, CR_HEIGHT=8` are fixed compile-time constants. The Ocean env, CNN, and action space always operate at 8×8 (64 cells).
-- `active_width` and `active_height` control the playable region at runtime. The C++ core uses a `valid_cells_mask` (64-bit bitmap) to restrict cascades, critical mass, legality, and alive-player detection to the active region.
-- The Python side computes an identical mask from `active_width × active_height` and ANDs it with the observation-sign legal mask: `legal = (obs >= 0) & valid_cells_mask`.
-- Inactive cells appear as 0 (empty) in the observation; the separate mask prevents them from being sampled.
-- The model architecture, optimizer state, and compiled Ocean binary persist across curriculum stages. Only `active_width`/`active_height` change.
-
-This eliminates rebuild overhead (~30s per size) and optimizer amnesia between sizes. The training loop never resets model parameters or optimizer momentum.
-
-### Per-Size Caps (measured 2026-05-07)
+### Round-Robin Curriculum (verified 2026-05-07)
 
 ```text
-size  p99.5  cap
-3x3   15     16
-4x4   29     32
-5x5   48     64
-6x6   70     80
-7x7   97     104
-8x8   128    136
+sizes: 4x4, 5x5, 6x6, 7x7, 8x8
+unlock interval: 100 updates
+schedule: one PPO update per size, then rotate
+eval: every 100 updates on the largest unlocked size
+sweep eval: every 500 updates across all unlocked sizes
 ```
 
-### Curriculum Results (mask approach, optimizer persistent, 2026-05-07)
+The fixed 8x8 compile target stays in place. Runtime `active_width` / `active_height` select the playable region, and the valid-cell mask keeps inactive cells out of legality, cascade resolution, and alive-player detection.
 
-Each size trained for 10 updates (1.3M impressions) before promoting at 90%+ 32-game interim winrate. Zero illegal actions, zero truncations throughout.
+### Measured Curriculum Results
 
-Final 1000-game evals against random legal play:
+The 32M-impression round-robin run reached 100% winrate against random legal play on all sizes `4x4`–`8x8`, with zero illegal actions and zero truncations. That is a floor, not a ceiling. More importantly, the same model then lost the self-play matchup against the scratch 8×8 checkpoint and showed uneven seat performance on 7×7, so the curriculum result is not strength evidence.
 
-```text
-3x3: 79.6% (P1=70.4%, P2=88.8%)
-4x4: 74.7% (P1=75.8%, P2=73.6%)
-5x5: 74.8% (P1=75.0%, P2=74.6%)
-6x6: 76.3% (P1=78.6%, P2=74.0%)
-7x7: 83.6% (P1=80.0%, P2=87.2%)
-8x8: 84.9% (P1=85.4%, P2=84.4%)
-```
+The first useful follow-up is to train dedicated models per size and compare them against curriculum transfer as an experiment. A useful future question is whether `8x8` training with `active_size=6` is equivalent to native `6x6` training.
 
-These are below the dedicated 4x4 model (99.8%) because each size only received 10 updates. More updates per size with optimizer persistence is the next lever.
-
-Current measured reference:
-
-```text
-source checkpoint: training/checkpoints/torch_ppo/1778140129666_0000000010027008.pt
-source board: 4x4
-target board: 8x8
-eval games: 1000
-combined winrate: 0.890
-P1 winrate: 0.862
-P2 winrate: 0.918
-Wilson lower bound: 0.8691
-illegal selected actions: 0
-truncations: 0
-terminal rate: 1.0
-```
-
-This does not make a 4x4 checkpoint an 8x8-trained agent. It does establish curriculum learning as the next primary route: learn small boards cheaply, transfer compatible spatial weights upward, reset optimizer state, fine-tune, and compare against same-budget target-board training from scratch. The curriculum should be fine-grained across `3x3` through `8x8` so each board-size jump is small enough to measure transfer, cap behavior, and optimization stability instead of hiding failure behind a large geometry shock.
-
-The useful training budget unit is not a naked global transition count. One PPO update consumes `total_agents * horizon` fresh environment impressions before optimization. The successful 4x4 runs used `1024 * 32 = 32768` fresh impressions per update with minibatches of `8192`; the signal question is whether each optimizer step sees enough fresh rollout mass to beat noise.
+The PPO update remains the bottleneck, not rollout. If training speed becomes the blocker for ablations, the next target is update-loop fusion, not gameplay refactoring.
 
 ## Training Pivot Back To Torch
 
-Native PufferLib model work is paused as the primary route. The attempt to reproduce the design CNN inside PufferLib exposed the wrong coupling: custom architectures currently require editing the PufferLib fork, rebuilding CUDA internals, and debugging model math, precision, PPO semantics, and kernel plumbing at the same time. That loop is too slow and too opaque for the current milestone.
+Native PufferLib model work is paused as the primary route. The repo-owned Torch PPO trainer is the readable development target, while PufferTank remains the environment execution path.
 
-The next learning milestone is therefore the repo-owned Torch PPO trainer:
+The next learning milestone is now:
 
-1. Treat `training/torch_ppo/model.py` as the canonical network implementation.
-2. Run through PufferTank so environment stepping still uses the same Ocean/Chain Reaction backend.
-3. First prove short finite runs with zero illegal sampled actions, finite losses, and JSON/W&B metrics.
-4. Then run checkpoint progression at a terminal-reaching cap (`max_turns >= 128`) and evaluate each checkpoint against random legal play under the same cap.
-5. Only after the exact design CNN learns measurably should we revisit native acceleration, Triton fusion, or a PufferLib extension seam.
+1. Evaluate the current curriculum checkpoint against the scratch 8x8 model.
+2. Compare incremental-unlock curriculum against flat round-robin with the same budget.
+3. Decide the AdamW weight decay and LR schedule explicitly.
+4. Add telemetry so the ablations are inspectable instead of vibes-based.
+5. Only then revisit native acceleration, Triton fusion, or a PufferLib extension seam.
 
-The native Puffer CNN checkpoint is a reproducible experiment, not the product direction. Its current shape is smaller than the design model and feeds PufferLib's MinGRU/default decoder rather than using spatial policy/value heads. It should not drive architecture decisions.
+The native Puffer CNN checkpoint is a reproducible experiment, not the product direction. It should not drive architecture decisions unless it matches the repo-owned spatial heads and value semantics.
 
 ## Neural Network Shape
 
