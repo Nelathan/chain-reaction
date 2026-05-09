@@ -94,7 +94,7 @@ class ChainReactionNet(nn.Module):
         return torch.cat((capacity / 4.0, own_count, opponent_count, signed_closeness), dim=1)
 
     def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = self._input(observations)
+        x = self._input(observations).to(dtype=next(self.parameters()).dtype)
         x = self.trunk(self.stem(x))
 
         policy = self.policy_head(x)

@@ -54,8 +54,11 @@ Useful performance knobs:
 
 ## Optimizer contract
 
-- The trainer uses `AdamW` with explicit `weight_decay=0.0`.
-- On CUDA, `AdamW` uses the fused path; CPU runs do not.
+- The trainer uses FlashOptim's `FlashAdamW` with default 24-bit master weights.
+- Model parameters are cast to `bfloat16` via FlashOptim's `cast_model` helper.
+- No mixed-precision scaffolding (`torch.amp`, `GradScaler`) is used; FlashOptim handles precision reduction internally with fused Triton update kernels.
+- Optimizer states (momentum, variance) are quantized to 8-bit; error correction terms maintain 24-bit master weight semantics.
+- Checkpoints are saved in FP32 via `get_fp32_model_state_dict` and restored with `set_fp32_model_state_dict`.
 - Learning rate stays constant for now; there is no scheduler in the baseline run shape.
 - If we want a scheduler later, it should be added as an experiment with measured impact, not smuggled in by default.
 

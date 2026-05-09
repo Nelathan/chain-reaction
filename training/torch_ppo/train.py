@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass
 import torch
 from torch import nn
 
+from flashoptim import FlashAdamW, cast_model
+
 from training.torch_ppo.gae import compute_negamax_gae
 from training.torch_ppo.masking import apply_mask_to_logits, compute_cells_mask, legal_action_mask
 from training.torch_ppo.model import ChainReactionNet
@@ -219,7 +221,7 @@ def validate_env_shape(vec: PufferVec, board_size: int) -> None:
         )
 
 
-def load_init_checkpoint(model: nn.Module, optimizer: torch.optim.Optimizer | None, config: TrainConfig) -> dict[str, int | str | None] | None:
+def load_init_checkpoint(model: nn.Module, optimizer: FlashAdamW, config: TrainConfig) -> dict[str, int | str | None] | None:
     if not config.init_checkpoint:
         return None
 
@@ -228,8 +230,9 @@ def load_init_checkpoint(model: nn.Module, optimizer: torch.optim.Optimizer | No
         raise SystemExit(f"init checkpoint not found: {checkpoint_path}")
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    model.load_state_dict(checkpoint["model"])
-    if optimizer is not None and "optimizer" in checkpoint:
+    # Restore FP32 weights into the bf16 model with error-bit recomputation.
+    optimizer.set_fp32_model_state_dict(model, checkpoint["model"])
+    if "optimizer" in checkpoint:
         optimizer.load_state_dict(checkpoint["optimizer"])
     checkpoint_config = checkpoint.get("config", {})
     return {
@@ -284,7 +287,7 @@ def run_eval(
 
 def ppo_update(
     model: nn.Module,
-    optimizer: torch.optim.Optimizer,
+    optimizer: FlashAdamW,
     observations: torch.Tensor,
     actions: torch.Tensor,
     old_logprobs: torch.Tensor,
@@ -370,11 +373,11 @@ def main() -> None:
     valid_cells_mask = compute_cells_mask(config.board_size, config.board_size, config.board_size).to(device)
 
     checkpoint_model = ChainReactionNet(board_size=config.board_size).to(device)
-    optimizer = torch.optim.AdamW(
+    cast_model(checkpoint_model, dtype=torch.bfloat16)
+    optimizer = FlashAdamW(
         checkpoint_model.parameters(),
         lr=config.learning_rate,
         weight_decay=config.weight_decay,
-        fused=(device.type == "cuda"),
     )
     transfer_meta = load_init_checkpoint(checkpoint_model, optimizer, config)
     model = maybe_compile_model(checkpoint_model, config)
@@ -399,6 +402,7 @@ def main() -> None:
                 f"eval_interval={config.eval_interval}",
                 f"compile_enabled={compile_enabled}",
                 f"sync_timing={sync_timing}",
+                f"optimizer=FlashAdamW",
                 f"device={device}",
             ]
         ),
@@ -538,7 +542,7 @@ def main() -> None:
             if update % config.checkpoint_interval == 0 or global_step >= config.total_timesteps:
                 path = os.path.join(config.checkpoint_dir, f"{run_id}_{global_step:016d}.pt")
                 checkpoint_payload = {
-                    "model": checkpoint_model.state_dict(),
+                    "model": optimizer.get_fp32_model_state_dict(checkpoint_model),
                     "optimizer": optimizer.state_dict(),
                     "config": asdict(config),
                     "step": global_step,

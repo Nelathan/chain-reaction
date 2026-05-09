@@ -12,6 +12,7 @@ dev = [
     "wheel>=0.42",
 ]
 training = [
+    "flashoptim>=0.1.4",
     "gymnasium>=1.0",
     "numpy>=1.26",
     "pufferlib @ git+https://github.com/PufferAI/PufferLib.git@4.0",

@@ -167,7 +167,7 @@ The next learning milestone is now:
 
 1. Evaluate a size-specific checkpoint against the scratch 8x8 model.
 2. Compare native `6x6` training against a same-settings `8x8` run.
-3. Decide the AdamW weight decay and LR schedule explicitly.
+3. Decide the FlashAdamW weight decay and LR schedule explicitly.
 4. Add telemetry so the ablations are inspectable instead of vibes-based.
 5. Only then revisit native acceleration, Triton fusion, or a PufferLib extension seam.
 
@@ -186,6 +186,7 @@ The first repo-owned training run should use this baseline unchanged unless it c
 - **Trunk:** three simple residual blocks at constant 32 channels: `Conv2d(32, 32, 3, padding=1)` -> `SiLU` -> `Conv2d(32, 32, 3, padding=1)` -> add to the stream. No normalization, stride, pooling, or dimensionality reduction in the trunk; the board stays an 8x8 board.
 - **Policy head:** `Conv2d(32, 1, kernel=1)` -> flatten the final 8x8 map into 64 action logits. Legal masking happens on logits before the categorical distribution is built, never by zeroing probabilities after softmax.
 - **Critic head:** `Conv2d(32, C_v, kernel=1)` with small `C_v` such as 4 or 8 -> `SiLU` -> global average pool -> one small MLP -> scalar value. Do not apply `tanh` in the baseline; terminal rewards are bounded, but value targets and bootstrapping should not be saturated by architecture.
+- **Precision:** the model is cast to `bfloat16` via FlashOptim's `cast_model` helper. Forward passes and updates operate at reduced precision with 24-bit master weight semantics; no `torch.amp` or `GradScaler` scaffolding is used. Checkpoints are saved and loaded in full FP32 via `get_fp32_model_state_dict`/`set_fp32_model_state_dict`.
 
 The policy avoids flattening the trunk into an MLP because actions are cells. A per-cell `1x1` projection keeps the action semantics aligned with board locations. The value head may aggregate globally because it predicts the whole position, not a move at one square.
 
