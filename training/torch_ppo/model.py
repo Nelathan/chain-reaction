@@ -80,11 +80,11 @@ class ChainReactionNet(nn.Module):
             observations = observations.unsqueeze(1)
         if observations.shape[-2:] != (self.board_size, self.board_size):
             raise ValueError(f"expected {self.board_size}x{self.board_size} observations, got {tuple(observations.shape)}")
-        return observations.float()
+        return observations.to(device=self.critical_mass.device, dtype=self.critical_mass.dtype)
 
     def _input(self, observations: torch.Tensor) -> torch.Tensor:
         board = self._board(observations)
-        capacity = self.critical_mass.to(dtype=board.dtype).expand(board.shape[0], -1, -1, -1)
+        capacity = self.critical_mass.expand(board.shape[0], -1, -1, -1)
         occupied = board != 0
         token_count = torch.where(occupied, capacity - board.abs(), torch.zeros_like(board))
         own_count = torch.where(board > 0, token_count, torch.zeros_like(board)) / 4.0
@@ -94,7 +94,7 @@ class ChainReactionNet(nn.Module):
         return torch.cat((capacity / 4.0, own_count, opponent_count, signed_closeness), dim=1)
 
     def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = self._input(observations).to(dtype=next(self.parameters()).dtype)
+        x = self._input(observations)
         x = self.trunk(self.stem(x))
 
         policy = self.policy_head(x)

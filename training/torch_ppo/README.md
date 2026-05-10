@@ -55,7 +55,7 @@ Useful performance knobs:
 ## Optimizer contract
 
 - The trainer uses FlashOptim's `FlashAdamW` with default 24-bit master weights.
-- Model parameters are cast to `bfloat16` via FlashOptim's `cast_model` helper.
+- Training and evaluation models run with native `bfloat16` parameters via `model.to(dtype=torch.bfloat16)`.
 - No mixed-precision scaffolding (`torch.amp`, `GradScaler`) is used; FlashOptim handles precision reduction internally with fused Triton update kernels.
 - Optimizer states (momentum, variance) are quantized to 8-bit; error correction terms maintain 24-bit master weight semantics.
 - Checkpoints are saved in FP32 via `get_fp32_model_state_dict` and restored with `set_fp32_model_state_dict`.

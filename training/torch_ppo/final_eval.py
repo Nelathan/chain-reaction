@@ -65,7 +65,7 @@ def evaluate_size(
         device_probe.close()
         raise SystemExit(f"env obs_size {actual} does not match board_size {board_size}")
     device_probe.close()
-    model = model.to(device).eval()
+    model = model.to(device=device, dtype=torch.bfloat16).eval()
     valid_cells_mask = compute_cells_mask(EVAL_BOARD_SIZE, board_size, board_size).to(device)
 
     p1_games, p2_games = split_games(games, checkpoint_player)

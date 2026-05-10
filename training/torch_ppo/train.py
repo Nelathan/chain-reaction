@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 import torch
 from torch import nn
 
-from flashoptim import FlashAdamW, cast_model
+from flashoptim import FlashAdamW
 
 from training.torch_ppo.gae import compute_negamax_gae
 from training.torch_ppo.masking import apply_mask_to_logits, compute_cells_mask, legal_action_mask
@@ -372,8 +372,7 @@ def main() -> None:
     device = vec.device
     valid_cells_mask = compute_cells_mask(config.board_size, config.board_size, config.board_size).to(device)
 
-    checkpoint_model = ChainReactionNet(board_size=config.board_size).to(device)
-    cast_model(checkpoint_model, dtype=torch.bfloat16)
+    checkpoint_model = ChainReactionNet(board_size=config.board_size).to(device=device, dtype=torch.bfloat16)
     optimizer = FlashAdamW(
         checkpoint_model.parameters(),
         lr=config.learning_rate,

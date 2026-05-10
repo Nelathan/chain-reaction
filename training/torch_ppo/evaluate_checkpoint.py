@@ -277,7 +277,7 @@ def main() -> None:
         device_probe.close()
         raise SystemExit(f"env obs_size {actual} does not match board_size {board_size}")
     device_probe.close()
-    model = model.to(device).eval()
+    model = model.to(device=device, dtype=torch.bfloat16).eval()
     valid_cells_mask = compute_cells_mask(board_size, board_size, board_size).to(device)
 
     opponent_model = None
@@ -288,7 +288,7 @@ def main() -> None:
         opp_ckpt, opp_ckpt_board_size, _ = load_checkpoint(args.opponent_checkpoint, board_size)
         opponent_model = ChainReactionNet(board_size=board_size)
         opponent_model.load_state_dict(opp_ckpt["model"])
-        opponent_model = opponent_model.to(device).eval()
+        opponent_model = opponent_model.to(device=device, dtype=torch.bfloat16).eval()
         opponent_checkpoint_board_size = opp_ckpt_board_size
 
     p1 = run_seat(args, model, 1, p1_games, opponent_model, valid_cells_mask)
