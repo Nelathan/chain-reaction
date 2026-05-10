@@ -39,6 +39,19 @@ uv run --group dev python test_bridge.py
 uv run --group dev python test_random_self_play.py
 ```
 
+## First playable shell
+
+Build the Cython bridge, then run the pygame-ce shell from the repository root:
+
+```bash
+cd training
+uv run --group dev setup.py build_ext --inplace
+cd ..
+uv run --group play python play.py
+```
+
+The pygame shell is presentation only: it renders core state, asks the core for legal moves, submits clicked actions, and displays the core-owned cascade log. It does not implement game rules.
+
 ## PufferTank native path
 
 Do not build or verify the native CUDA trainer on the host. Use the PufferTank image through Compose; the image is the toolchain contract.

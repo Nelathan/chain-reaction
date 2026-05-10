@@ -11,6 +11,9 @@ dev = [
     "setuptools>=69",
     "wheel>=0.42",
 ]
+play = [
+    "pygame-ce>=2.5",
+]
 training = [
     "flashoptim>=0.1.4",
     "gymnasium>=1.0",

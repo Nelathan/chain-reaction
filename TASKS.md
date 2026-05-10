@@ -93,7 +93,7 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [ ] Run a longer native single-policy training job only after terminal/truncation telemetry and train/eval caps are aligned.
 - [ ] Evaluate multiple checkpoints from the same native run against random legal play only after cap alignment.
 - [ ] Produce a checkpoint-progression table with steps, combined winrate, P1 winrate, P2 winrate, mean episode length, and truncations only after cap alignment.
-- [ ] Add a CLI/TUI replay viewer for policy/debug inspection before Godot integration.
+- [x] Add a `pygame-ce` playable/debug shell before Godot integration.
 - [ ] Export an inference artifact usable by Godot.
 
 ## Phase 5 — Bind Godot GDExtension

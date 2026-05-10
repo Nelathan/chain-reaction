@@ -115,7 +115,8 @@ The observation schema is derived from stable simulation states for training: si
 
 We are optimizing for a one-day development cycle to reach a playable prototype.
 
-- **Visuals:** Godot renders the state array. No shader cleverness until the AI can beat a human.
+- **First Playable:** use `pygame-ce` as a disposable debug/play shell over the shared core before Godot. It may render board state, collect clicks/keys, display core-owned legal masks and cascade logs, and invoke policy inference. It must not own gameplay rules.
+- **Visuals:** Godot remains the eventual polished renderer for the state array. No shader cleverness until the AI can beat a human.
 - **Training:** the primary model-iteration path is repo-owned PyTorch PPO with the exact tiny CNN described below and, later, history-pool self-play. Native PufferLib remains a fast environment/native-trainer experiment, not the source of truth for architecture iteration. Do not claim native CNN parity unless the runtime model print and code path match this document.
 - **Observation:** the environment exports signed distance to explosion, `(critical_mass - current_tokens) * owner_sign`, with `owner_sign` measured from the acting player's perspective. The Torch model derives normalized capacity, own-token count, opponent-token count, and signed-closeness-to-critical planes from that observation; gameplay consumers must not duplicate cascade rules.
 - **Fun Factor:** Godot inference uses temperature scaling. Same weights, higher entropy. The goal is adjustable personality: from Terminator to distracted sibling.
@@ -135,7 +136,7 @@ Training starts from scratch. No human data, supervised fine-tuning, GANs, or th
 - **Development target:** first meaningful training belongs on the CUDA workstation or PufferTank Docker, not the M1 laptop. The laptop is for rule verification, Cython smoke tests, and occasional CPU build probes. Do not tune the neural net around macOS CPU constraints.
 - **Native trainer verification:** the host is not the source of truth for CUDA viability. Submodule changes must be injected through the PufferTank image by bind-mounting this repo, rebuilding inside the image, and running at least a tiny finite smoke. A build/smoke pass is necessary but not sufficient: native semantic patches still need code review or focused kernel fixtures, especially where PufferLib selects different scalar/vector paths based on horizon alignment.
 - **Container artifact boundary:** Compose plus bind mounts is the development contract because it guarantees the image builds the current working tree and submodule checkout. A derived Dockerfile from `pufferai/puffertank:4.0` is appropriate for CI or release freezing, but it must not replace the edit/review loop until native semantics are stable; copied source layers are too easy to make stale during CUDA patch review.
-- **Next product loop:** prove one minimal end-to-end training run before polishing presentation. After the first checkpoint can be trained, saved, and loaded, build a cheap CLI/TUI replay/debug viewer before Godot so policy behavior, legal masks, rewards, terminal states, and cascade depths are inspectable without renderer ceremony.
+- **Next product loop:** prove one minimal end-to-end training run before polishing presentation. After the first checkpoint can be trained, saved, and loaded, build a cheap `pygame-ce` replay/debug/play viewer before Godot so policy behavior, legal masks, rewards, terminal states, and cascade depths are inspectable without renderer ceremony or TUI input/display tax.
 
 ## Board-Size Transfer
 
