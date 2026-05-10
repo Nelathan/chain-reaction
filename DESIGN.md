@@ -118,6 +118,7 @@ We are optimizing for a one-day development cycle to reach a playable prototype.
 - **First Playable:** use `pygame-ce` as a disposable debug/play shell over the shared core before Godot. It may render board state, collect clicks/keys, display core-owned legal masks and cascade logs, and invoke policy inference. It must not own gameplay rules.
 - **Visuals:** Godot remains the eventual polished renderer for the state array. No shader cleverness until the AI can beat a human.
 - **Training:** the primary model-iteration path is repo-owned PyTorch PPO with the exact tiny CNN described below and, later, history-pool self-play. Native PufferLib remains a fast environment/native-trainer experiment, not the source of truth for architecture iteration. Do not claim native CNN parity unless the runtime model print and code path match this document.
+- **Playable AI Runtime:** keep Torch as the development inference runtime for the pygame shell because it consumes the actual `.pt` checkpoints without conversion or parity risk. Tinygrad, ONNX, native export, or Godot-facing artifacts are follow-up runtime-slimming work after the model is visibly worth carrying forward.
 - **Observation:** the environment exports signed distance to explosion, `(critical_mass - current_tokens) * owner_sign`, with `owner_sign` measured from the acting player's perspective. The Torch model derives normalized capacity, own-token count, opponent-token count, and signed-closeness-to-critical planes from that observation; gameplay consumers must not duplicate cascade rules.
 - **Fun Factor:** Godot inference uses temperature scaling. Same weights, higher entropy. The goal is adjustable personality: from Terminator to distracted sibling.
 
@@ -153,6 +154,8 @@ Use these rollout rules of record:
 - `horizon` defaults to `32`.
 - `max_turns` is size-specific and chosen from measured episode lengths. `horizon` chunks PPO updates; truncation prevents runaway games.
 - Eval against random legal play is now a sanity check, not the discriminating benchmark. Self-play is the next honest metric.
+
+The first playable 8x8 checkpoint is `training/checkpoints/torch_ppo/1778429882927_0000000030015488.pt`, trained for `30,015,488` impressions and logged to W&B run `1778429882927`. Human smoke testing found it beat local play in late chaotic positions but remained beatable with careful play, so it is a fun first house AI rather than a solved-game claim. The next useful training shape is more optimizer updates, not merely more transitions in larger chunks: 230 updates was enough to become playable, but the next target should be at least 1k updates, and 10k if wall-clock permits.
 
 The useful unanswered question is whether native `6x6` training matches a same-settings `8x8` run.
 

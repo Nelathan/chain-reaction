@@ -30,6 +30,9 @@ version = "0.1.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
+ai = [
+    { name = "torch" },
+]
 dev = [
     { name = "cython" },
     { name = "setuptools" },
@@ -48,6 +51,7 @@ training = [
 [package.metadata]
 
 [package.metadata.requires-dev]
+ai = [{ name = "torch", specifier = ">=2.0" }]
 dev = [
     { name = "cython", specifier = ">=3.0" },
     { name = "setuptools", specifier = ">=69" },

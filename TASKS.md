@@ -94,6 +94,9 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [ ] Evaluate multiple checkpoints from the same native run against random legal play only after cap alignment.
 - [ ] Produce a checkpoint-progression table with steps, combined winrate, P1 winrate, P2 winrate, mean episode length, and truncations only after cap alignment.
 - [x] Add a `pygame-ce` playable/debug shell before Godot integration.
+- [x] Add Torch checkpoint inference to the playable shell.
+- [x] Train and smoke-test the first human-playable 8x8 Torch PPO checkpoint.
+- [ ] Run a longer 8x8 Torch PPO training with at least 1k updates; prefer 10k updates if wall-clock allows.
 - [ ] Export an inference artifact usable by Godot.
 
 ## Phase 5 — Bind Godot GDExtension

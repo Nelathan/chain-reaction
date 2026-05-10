@@ -52,6 +52,25 @@ uv run --group play python play.py
 
 The pygame shell is presentation only: it renders core state, asks the core for legal moves, submits clicked actions, and displays the core-owned cascade log. It does not implement game rules.
 
+To play against a Torch PPO checkpoint, keep Torch as the development runtime and pass a checkpoint path, or `latest` for the newest ignored `.pt` under the usual checkpoint/model directories:
+
+```bash
+uv run --group play --group ai python play.py --checkpoint latest --ai-player 2 --temperature 0.5
+```
+
+This is intentionally a convenience runtime. A tinygrad or native export can come later after the playable AI loop is worth slimming.
+
+The first human-playable AI checkpoint came from a 30M-impression 8x8 Torch PPO run:
+
+```bash
+uv run --group play --group ai python play.py \
+  --checkpoint training/checkpoints/torch_ppo/1778429882927_0000000030015488.pt \
+  --ai-player 2 \
+  --temperature 0.5
+```
+
+W&B logging uses `CHAIN_REACTION_WANDB_ENTITY`, falling back to `WANDB_ENTITY` through Compose.
+
 ## PufferTank native path
 
 Do not build or verify the native CUDA trainer on the host. Use the PufferTank image through Compose; the image is the toolchain contract.

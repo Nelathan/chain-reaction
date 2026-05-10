@@ -62,6 +62,11 @@ PLAYER_NAMES = {
     1: "Blue / P1",
     2: "Red / P2",
 }
+CHECKPOINT_ROOTS = (
+    ROOT / "training" / "checkpoints",
+    ROOT / "checkpoints",
+    ROOT / "models",
+)
 
 
 @dataclass(frozen=True)
@@ -102,8 +107,89 @@ def wave_snapshots(env: object) -> list[BoardSnapshot]:
     return frames
 
 
+def resolve_checkpoint(value: str | None) -> Path | None:
+    if value is None:
+        return None
+    if value != "latest":
+        path = Path(value).expanduser()
+        return path if path.is_absolute() else ROOT / path
+
+    candidates = sorted(
+        (path for root in CHECKPOINT_ROOTS if root.exists() for path in root.rglob("*.pt")),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not candidates:
+        roots = ", ".join(str(root) for root in CHECKPOINT_ROOTS)
+        raise SystemExit(f"No Torch checkpoints found under: {roots}")
+    return candidates[0]
+
+
+class TorchPolicy:
+    def __init__(self, checkpoint_path: Path, temperature: float, device: str) -> None:
+        try:
+            import torch
+            from training.torch_ppo.model import ChainReactionNet
+        except ImportError as exc:  # pragma: no cover - exercised by humans.
+            raise SystemExit(
+                "Torch policy runtime is not installed. Run with:\n"
+                "  uv run --group play --group ai python play.py --checkpoint latest\n"
+                "or use `--group training` if you already keep the training stack installed."
+            ) from exc
+
+        if not checkpoint_path.exists():
+            raise SystemExit(f"checkpoint not found: {checkpoint_path}")
+
+        self.torch = torch
+        self.temperature = temperature
+        self.device = torch.device(device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        config = checkpoint.get("config", {})
+        board_size = int(config.get("board_size", checkpoint.get("board_size", BOARD_SIZE)))
+        if board_size != BOARD_SIZE:
+            raise SystemExit(
+                f"checkpoint board_size={board_size} is not compatible with this {BOARD_SIZE}x{BOARD_SIZE} shell"
+            )
+        self.checkpoint_path = checkpoint_path
+        self.step = checkpoint.get("step")
+        self.model = ChainReactionNet(board_size=BOARD_SIZE)
+        self.model.load_state_dict(checkpoint["model"])
+        self.model = self.model.to(device=self.device, dtype=torch.float32).eval()
+        self.generator = torch.Generator(device=self.device)
+        self.generator.manual_seed(20260510)
+
+    @property
+    def label(self) -> str:
+        name = self.checkpoint_path.name
+        if self.step is None:
+            return name
+        return f"{name} @ {self.step}"
+
+    def select_action(self, env: object, player: int) -> int:
+        torch = self.torch
+        observation = torch.tensor([env.observation(player)], dtype=torch.float32, device=self.device)
+        legal = torch.tensor(env.legal_actions(player), dtype=torch.bool, device=self.device)
+        if not bool(legal.any().item()):
+            raise RuntimeError(f"core returned no legal actions for player {player}")
+
+        with torch.no_grad():
+            logits, _value = self.model(observation)
+            masked = logits[0].masked_fill(~legal, torch.finfo(logits.dtype).min)
+            if self.temperature <= 0.0:
+                return int(masked.argmax().item())
+            probabilities = torch.softmax(masked / self.temperature, dim=0)
+            return int(torch.multinomial(probabilities, 1, generator=self.generator).item())
+
+
 class ChainReactionApp:
-    def __init__(self, cell_size: int, wave_ms: int) -> None:
+    def __init__(
+        self,
+        cell_size: int,
+        wave_ms: int,
+        policy: TorchPolicy | None = None,
+        ai_player: int = 2,
+        ai_delay_ms: int = 300,
+    ) -> None:
         pygame.init()
         pygame.display.set_caption("Chain Reaction — core-backed playable shell")
 
@@ -119,11 +205,16 @@ class ChainReactionApp:
 
         self.board_rect = pygame.Rect(GRID_MARGIN, GRID_MARGIN, self.board_px, self.board_px)
         self.env = chain_reaction_core.PyChainReaction()
+        self.policy = policy
+        self.ai_player = ai_player
+        self.ai_delay_ms = ai_delay_ms
+        self.next_ai_at = 0
         self.wave_ms = wave_ms
         self.frames: list[BoardSnapshot] = []
         self.frame_index = 0
         self.next_frame_at = 0
         self.message = "Click a highlighted cell. R resets. Esc quits."
+        self.schedule_ai_if_needed(pygame.time.get_ticks())
 
     def reset(self) -> None:
         self.env.reset()
@@ -131,6 +222,7 @@ class ChainReactionApp:
         self.frame_index = 0
         self.next_frame_at = 0
         self.message = "New game. Blue / P1 to move."
+        self.schedule_ai_if_needed(pygame.time.get_ticks())
 
     def run(self) -> None:
         running = True
@@ -138,6 +230,7 @@ class ChainReactionApp:
             now = pygame.time.get_ticks()
             running = self.handle_events()
             self.advance_animation(now)
+            self.maybe_run_ai(now)
             self.draw()
             pygame.display.flip()
             self.clock.tick(FPS)
@@ -162,6 +255,9 @@ class ChainReactionApp:
     def handle_click(self, pos: tuple[int, int]) -> None:
         if self.frames or self.env.get_winner() != 0:
             return
+        if self.is_ai_turn():
+            self.message = f"{PLAYER_NAMES[self.ai_player]} is controlled by the checkpoint."
+            return
         if not self.board_rect.collidepoint(pos):
             return
 
@@ -169,15 +265,20 @@ class ChainReactionApp:
         y = (pos[1] - self.board_rect.top) // self.cell_size
         action = int(y * BOARD_SIZE + x)
         player = current_player(self.env)
+        self.perform_move(action, player, f"{PLAYER_NAMES[player]}", x, y)
+
+    def perform_move(self, action: int, player: int, actor_label: str, x: int | None = None, y: int | None = None) -> bool:
         legal = self.env.legal_actions(player)
         if not legal[action]:
+            if x is None or y is None:
+                y, x = divmod(action, BOARD_SIZE)
             self.message = f"Illegal move for {PLAYER_NAMES[player]} at ({x}, {y})."
-            return
+            return False
 
         accepted = self.env.step(action, player)
         if not accepted:
             self.message = "Core rejected move. State was not changed."
-            return
+            return False
 
         self.frames = wave_snapshots(self.env)
         self.frame_index = 0
@@ -186,9 +287,34 @@ class ChainReactionApp:
         if winner:
             self.message = f"{PLAYER_NAMES[winner]} wins. Press R for the next explosion garden."
         elif self.frames:
-            self.message = f"Cascade resolved in {len(self.frames)} wave(s)."
+            self.message = f"{actor_label} moved. Cascade resolved in {len(self.frames)} wave(s)."
         else:
-            self.message = f"Accepted. {PLAYER_NAMES[current_player(self.env)]} to move."
+            self.message = f"{actor_label} moved. {PLAYER_NAMES[current_player(self.env)]} to move."
+        self.schedule_ai_if_needed(pygame.time.get_ticks())
+        return True
+
+    def is_ai_turn(self) -> bool:
+        return self.policy is not None and current_player(self.env) == self.ai_player and self.env.get_winner() == 0
+
+    def schedule_ai_if_needed(self, now: int) -> None:
+        if self.is_ai_turn() and not self.frames:
+            self.next_ai_at = now + self.ai_delay_ms
+        else:
+            self.next_ai_at = 0
+
+    def maybe_run_ai(self, now: int) -> None:
+        if not self.is_ai_turn() or self.frames:
+            return
+        if self.next_ai_at == 0:
+            self.next_ai_at = now + self.ai_delay_ms
+            return
+        if now < self.next_ai_at:
+            return
+        assert self.policy is not None
+        player = current_player(self.env)
+        action = self.policy.select_action(self.env, player)
+        y, x = divmod(action, BOARD_SIZE)
+        self.perform_move(action, player, f"AI {PLAYER_NAMES[player]} ({x}, {y})", x, y)
 
     def advance_animation(self, now: int) -> None:
         if not self.frames:
@@ -200,6 +326,7 @@ class ChainReactionApp:
         if self.frame_index >= len(self.frames):
             self.frames = []
             self.frame_index = 0
+            self.schedule_ai_if_needed(now)
 
     def visible_snapshot(self) -> BoardSnapshot:
         if self.frames:
@@ -265,6 +392,12 @@ class ChainReactionApp:
             f"Waves: {self.env.wave_count}",
             f"Log truncated: {bool(self.env.wave_log_truncated)}",
         ]
+        if self.policy is not None:
+            lines.extend([
+                "",
+                f"AI: {PLAYER_NAMES[self.ai_player]}",
+                f"Temp: {self.policy.temperature}",
+            ])
         if snapshot.label:
             lines.extend(["", f"Showing {snapshot.label}"])
 
@@ -278,7 +411,7 @@ class ChainReactionApp:
 
         help_lines = [
             "Controls",
-            "click: core step",
+            "click: human move",
             "space: skip animation",
             "r: reset",
             "esc: quit",
@@ -307,12 +440,31 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Play Chain Reaction through pygame-ce.")
     parser.add_argument("--cell-size", type=int, default=72, help="Rendered cell size in pixels.")
     parser.add_argument("--wave-ms", type=int, default=220, help="Milliseconds per cascade wave frame.")
+    parser.add_argument(
+        "--checkpoint",
+        default=None,
+        help="Torch PPO checkpoint path, or 'latest' for the newest .pt under training/checkpoints.",
+    )
+    parser.add_argument("--ai-player", type=int, choices=(1, 2), default=2, help="Player controlled by the checkpoint.")
+    parser.add_argument("--temperature", type=float, default=0.0, help="AI sampling temperature; 0 chooses argmax.")
+    parser.add_argument("--device", default="cpu", help="Torch device for checkpoint inference.")
+    parser.add_argument("--ai-delay-ms", type=int, default=300, help="Delay before AI moves, for readability.")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    app = ChainReactionApp(cell_size=args.cell_size, wave_ms=args.wave_ms)
+    checkpoint = resolve_checkpoint(args.checkpoint)
+    policy = TorchPolicy(checkpoint, args.temperature, args.device) if checkpoint is not None else None
+    if policy is not None:
+        print(f"Loaded checkpoint AI: {policy.label} from {policy.checkpoint_path}", flush=True)
+    app = ChainReactionApp(
+        cell_size=args.cell_size,
+        wave_ms=args.wave_ms,
+        policy=policy,
+        ai_player=args.ai_player,
+        ai_delay_ms=args.ai_delay_ms,
+    )
     app.run()
 
 

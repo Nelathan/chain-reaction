@@ -11,6 +11,9 @@ dev = [
     "setuptools>=69",
     "wheel>=0.42",
 ]
+ai = [
+    "torch>=2.0",
+]
 play = [
     "pygame-ce>=2.5",
 ]
