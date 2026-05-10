@@ -157,6 +157,18 @@ Use these rollout rules of record:
 
 The first playable 8x8 checkpoint is `training/checkpoints/torch_ppo/1778429882927_0000000030015488.pt`, trained for `30,015,488` impressions and logged to W&B run `1778429882927`. Human smoke testing found it beat local play in late chaotic positions but remained beatable with careful play, so it is a fun first house AI rather than a solved-game claim. The next useful training shape is more optimizer updates, not merely more transitions in larger chunks: 230 updates was enough to become playable, but the next target should be at least 1k updates, and 10k if wall-clock permits.
 
+The repo-owned Torch PPO baseline currently uses constant learning rate, not cosine annealing. `FlashAdamW` receives `weight_decay=0.0` by default, preserving the earlier decision to avoid AdamW decay until there is evidence for it. Training telemetry must include active LR and pre-clip gradient norm so entropy, KL, policy loss, and value loss can be interpreted against optimizer pressure rather than dashboard astrology.
+
+The first 1k-update follow-up is `training/checkpoints/torch_ppo/1778438234551_0000000032768000.pt`, logged to W&B run `1778438234551`. It held `lr=0.0003` and `weight_decay=0.0`, used `horizon=32` and `total_agents=1024`, and completed exactly 1000 optimizer updates. Treat it as the next playable candidate and compare by human play / checkpoint-vs-checkpoint, not random legal play.
+
+The default 8x8 Torch PPO shape is now the 1k-update profile: `horizon=32`, `total_agents=1024`, `minibatch_size=32768`, one PPO epoch, `32,768,000` impressions. The prepared big-run profile targets 10k updates with `horizon=32`, `total_agents=256`, `minibatch_size=8192`, and `81,920,000` impressions. This deliberately increases optimizer-update count rather than inflating rollout slabs.
+
+PPO curves are not SFT curves. Entropy, policy loss, value loss, and approximate KL can move non-monotonically because the rollout distribution is created by the current policy and changes as the policy improves. Entropy decreasing then rising over training steps should be read as a policy/data-regime shift or entropy-pressure effect, not automatically as failure or success. Value loss spikes may mean the critic is chasing a newly discovered return regime. Policy loss and KL are optimizer-pressure sensors, not standalone skill metrics.
+
+Do not overread cheap sanity metrics. Illegal selected actions should remain zero because legal masking is wired before sampling; that proves the mask path, not learning. Truncations should remain zero under a measured cap for normal 8x8 games; that proves the harness cap is not poisoning episodes, not skill. Random-legal-play winrate is now a smoke gate only. Human play, checkpoint-vs-checkpoint, self-play ladders, and eventually history-pool evaluation carry more signal.
+
+Telemetry of record for Torch PPO now includes PPO clip fraction, critic explained variance, policy top-1/top-2 legal-logit margin, pre-clip gradient norm, and active learning rate. If KL and policy loss remain tiny, clip fraction and logit margin help distinguish genuinely tiny updates from a scalar-loss cancellation artifact.
+
 The useful unanswered question is whether native `6x6` training matches a same-settings `8x8` run.
 
 Small-model note: the smaller checkpoint is not random-noise—it beats random legal play—but it still loses the size-matched head-to-head, which says it has learned the rules surface without yet carrying enough board-size-specific tactics.

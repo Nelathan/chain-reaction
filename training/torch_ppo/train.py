@@ -302,6 +302,10 @@ def ppo_update(
         "value": torch.zeros((), device=observations.device),
         "entropy": torch.zeros((), device=observations.device),
         "approx_kl": torch.zeros((), device=observations.device),
+        "grad_norm_pre_clip": torch.zeros((), device=observations.device),
+        "clip_fraction": torch.zeros((), device=observations.device),
+        "value_explained_variance": torch.zeros((), device=observations.device),
+        "logit_margin": torch.zeros((), device=observations.device),
     }
     steps = 0
 
@@ -339,15 +343,34 @@ def ppo_update(
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
-            nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm, foreach=True)
+            grad_norm = nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm, foreach=True)
             optimizer.step()
 
             with torch.no_grad():
                 approx_kl = ((ratio - 1.0) - logratio).mean()
+                clip_fraction = ((ratio - 1.0).abs() > config.clip_coef).float().mean()
+                returns_float = mb_returns.float()
+                values_float = new_values.float()
+                return_variance = returns_float.var(unbiased=False)
+                if return_variance > 1e-8:
+                    value_explained_variance = 1.0 - (returns_float - values_float).var(unbiased=False) / return_variance
+                else:
+                    value_explained_variance = torch.zeros((), device=observations.device)
+
+                enough_legal = mb_legal_masks.sum(dim=1) >= 2
+                if bool(enough_legal.any().item()):
+                    top2_logits = masked_logits.float()[enough_legal].topk(2, dim=1).values
+                    logit_margin = (top2_logits[:, 0] - top2_logits[:, 1]).mean()
+                else:
+                    logit_margin = torch.zeros((), device=observations.device)
             loss_tensors["policy"] += policy_loss.detach()
             loss_tensors["value"] += value_loss.detach()
             loss_tensors["entropy"] += entropy.detach()
             loss_tensors["approx_kl"] += approx_kl.detach()
+            loss_tensors["grad_norm_pre_clip"] += grad_norm.detach()
+            loss_tensors["clip_fraction"] += clip_fraction.detach()
+            loss_tensors["value_explained_variance"] += value_explained_variance.detach()
+            loss_tensors["logit_margin"] += logit_margin.detach()
             steps += 1
 
     if steps == 0:
@@ -402,6 +425,8 @@ def main() -> None:
                 f"compile_enabled={compile_enabled}",
                 f"sync_timing={sync_timing}",
                 f"optimizer=FlashAdamW",
+                f"learning_rate={config.learning_rate}",
+                f"weight_decay={config.weight_decay}",
                 f"device={device}",
             ]
         ),
@@ -475,6 +500,11 @@ def main() -> None:
                 "loss/value": loss_logs["value"],
                 "loss/entropy": loss_logs["entropy"],
                 "loss/approx_kl": loss_logs["approx_kl"],
+                "loss/clip_fraction": loss_logs["clip_fraction"],
+                "value/explained_variance": loss_logs["value_explained_variance"],
+                "policy/logit_margin": loss_logs["logit_margin"],
+                "optim/grad_norm_pre_clip": loss_logs["grad_norm_pre_clip"],
+                "optim/lr": optimizer.param_groups[0]["lr"],
             })
 
             should_log = update % config.log_interval == 0 or global_step >= config.total_timesteps
@@ -500,6 +530,11 @@ def main() -> None:
                             f"value_loss={averaged.get('loss/value')}",
                             f"entropy={averaged.get('loss/entropy')}",
                             f"approx_kl={averaged.get('loss/approx_kl')}",
+                            f"clip_fraction={averaged.get('loss/clip_fraction')}",
+                            f"value_ev={averaged.get('value/explained_variance')}",
+                            f"logit_margin={averaged.get('policy/logit_margin')}",
+                            f"grad_norm_pre_clip={averaged.get('optim/grad_norm_pre_clip')}",
+                            f"lr={averaged.get('optim/lr')}",
                         ]
                 ),
                     flush=True,

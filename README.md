@@ -71,6 +71,35 @@ uv run --group play --group ai python play.py \
 
 W&B logging uses `CHAIN_REACTION_WANDB_ENTITY`, falling back to `WANDB_ENTITY` through Compose.
 
+## Torch PPO training shapes
+
+The default Torch PPO launch shape is the 1k-update 8x8 profile:
+
+```text
+horizon=32
+total_agents=1024
+minibatch_size=32768
+update_epochs=1
+total_timesteps=32768000
+```
+
+Run it through PufferTank with the Torch entrypoint override:
+
+```bash
+podman compose -f compose.yaml -f compose.podman.yaml run --rm \
+  -e CHAIN_REACTION_WANDB=1 \
+  puffer bash -lc 'uv pip install --python /puffertank/venv/bin/python flashoptim==0.1.4 && bash /workspace/chain-reaction/training/torch_ppo/train.sh'
+```
+
+For the larger 10k-update profile, use the prepared launcher inside the same container path:
+
+```bash
+podman compose -f compose.yaml -f compose.podman.yaml run --rm \
+  puffer bash -lc 'uv pip install --python /puffertank/venv/bin/python flashoptim==0.1.4 && bash /workspace/chain-reaction/training/torch_ppo/train_8x8_10k.sh'
+```
+
+The trainer logs active LR, pre-clip grad norm, PPO clip fraction, critic explained variance, and policy logit margin so loss/entropy/KL curves can be interpreted against optimizer pressure.
+
 ## PufferTank native path
 
 Do not build or verify the native CUDA trainer on the host. Use the PufferTank image through Compose; the image is the toolchain contract.

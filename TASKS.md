@@ -96,7 +96,13 @@ Atomic execution steps only. Each item should be binary: done or not done. No va
 - [x] Add a `pygame-ce` playable/debug shell before Godot integration.
 - [x] Add Torch checkpoint inference to the playable shell.
 - [x] Train and smoke-test the first human-playable 8x8 Torch PPO checkpoint.
-- [ ] Run a longer 8x8 Torch PPO training with at least 1k updates; prefer 10k updates if wall-clock allows.
+- [x] Log active learning rate and pre-clip gradient norm in Torch PPO.
+- [x] Log PPO clip fraction, critic explained variance, and policy logit margin.
+- [x] Run a longer 8x8 Torch PPO training with at least 1k updates.
+- [x] Make the 1k-update 8x8 profile the default Torch PPO launch shape.
+- [x] Add a prepared 10k-update 8x8 Torch PPO launcher.
+- [ ] Compare the 1k-update checkpoint against the first playable checkpoint in checkpoint-vs-checkpoint evaluation.
+- [ ] Run a 10k-update 8x8 Torch PPO training if wall-clock allows.
 - [ ] Export an inference artifact usable by Godot.
 
 ## Phase 5 — Bind Godot GDExtension
